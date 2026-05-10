@@ -1,13 +1,17 @@
 package dev.archtelemetry.adapter.cli;
 
 import dev.archtelemetry.application.HealthReport;
+import dev.archtelemetry.application.InstabilityWarning;
 import dev.archtelemetry.domain.DriftDirection;
+import dev.archtelemetry.domain.ModuleMetrics;
 import dev.archtelemetry.domain.Snapshot;
 import dev.archtelemetry.domain.Trend;
 import dev.archtelemetry.domain.Violation;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public final class HealthReportPrinter {
 
@@ -33,6 +37,29 @@ public final class HealthReportPrinter {
                     count == 1 ? "violation" : "violations");
         }
         System.out.println();
+
+        if (report.latestProfile() != null) {
+            System.out.println("--- Module Metrics (latest snapshot) ---");
+            System.out.printf("%-20s %6s %7s %11s%n", "Module", "Fan-In", "Fan-Out", "Instability");
+            report.latestProfile().moduleMetrics().stream()
+                    .sorted(Comparator.comparing(m -> m.module().name()))
+                    .forEach(m -> System.out.printf("%-20s %6d %7d %11.2f  %s%n",
+                            m.module().name(), m.fanIn(), m.fanOut(), m.instability(), moduleFlag(m)));
+            System.out.println();
+
+            System.out.println("--- Dependency Cycles ---");
+            if (report.latestProfile().cycles().isEmpty()) {
+                System.out.println("  (none)");
+            } else {
+                report.latestProfile().cycles().forEach(cycle -> {
+                    String path = cycle.modules().stream()
+                            .map(mod -> mod.name())
+                            .collect(Collectors.joining(" -> "));
+                    System.out.println("  ⚠ " + path);
+                });
+            }
+            System.out.println();
+        }
 
         System.out.printf("--- Current Violations (%d) ---%n", report.totalViolations());
         if (entries.isEmpty()) {
@@ -70,6 +97,26 @@ public final class HealthReportPrinter {
                     .sorted()
                     .forEach(System.out::println);
         }
+
+        if (!report.instabilityWarnings().isEmpty()) {
+            System.out.println();
+            System.out.println("--- Instability Warnings ---");
+            report.instabilityWarnings().stream()
+                    .sorted(Comparator.comparing(w -> w.module().name()))
+                    .forEach(w -> System.out.println("  ⚠ " + w.module().name() + ": " + w.reason()));
+        }
+    }
+
+    private static String moduleFlag(ModuleMetrics m) {
+        int layer = m.module().layer();
+        boolean highInstability = m.instability() > 0.5;
+        if (layer < 0) {
+            return highInstability ? "⚠ high coupling" : "";
+        }
+        if (layer <= 1) {
+            return highInstability ? "⚠ high coupling" : (layer == 0 ? "✓ stable core" : "✓ healthy");
+        }
+        return highInstability ? "✓ expected" : "";
     }
 
     private static String formatDirection(DriftDirection direction) {

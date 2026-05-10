@@ -7,14 +7,20 @@ public final class Module {
 
     private final String name;
     private final List<String> packagePatterns;
+    private final int layer;
 
     public Module(String name) {
-        this(name, List.of());
+        this(name, List.of(), -1);
     }
 
     public Module(String name, List<String> packagePatterns) {
+        this(name, packagePatterns, -1);
+    }
+
+    public Module(String name, List<String> packagePatterns, int layer) {
         this.name = Objects.requireNonNull(name);
         this.packagePatterns = List.copyOf(packagePatterns);
+        this.layer = layer;
     }
 
     public String name() {
@@ -23,6 +29,10 @@ public final class Module {
 
     public List<String> packagePatterns() {
         return packagePatterns;
+    }
+
+    public int layer() {
+        return layer;
     }
 
     @Override

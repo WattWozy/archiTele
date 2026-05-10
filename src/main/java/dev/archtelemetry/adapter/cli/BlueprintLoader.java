@@ -21,6 +21,7 @@ public final class BlueprintLoader {
         try {
             List<String> lines = Files.readAllLines(path);
             Map<String, List<String>> modulePatterns = new LinkedHashMap<>();
+            Map<String, Integer> moduleLayers = new LinkedHashMap<>();
             List<String[]> allowRules = new ArrayList<>();
 
             for (String raw : lines) {
@@ -32,8 +33,21 @@ public final class BlueprintLoader {
                     int space = rest.indexOf(' ');
                     if (space < 0) continue;
                     String name = rest.substring(0, space).strip();
-                    String pattern = rest.substring(space + 1).strip();
-                    modulePatterns.computeIfAbsent(name, k -> new ArrayList<>()).add(pattern);
+                    String remaining = rest.substring(space + 1).strip();
+
+                    String[] tokens = remaining.split("\\s+");
+                    int layer = -1;
+                    StringBuilder patternBuilder = new StringBuilder();
+                    for (String token : tokens) {
+                        if (token.startsWith("layer=")) {
+                            try { layer = Integer.parseInt(token.substring(6)); } catch (NumberFormatException ignored) {}
+                        } else {
+                            if (patternBuilder.length() > 0) patternBuilder.append(" ");
+                            patternBuilder.append(token);
+                        }
+                    }
+                    modulePatterns.computeIfAbsent(name, k -> new ArrayList<>()).add(patternBuilder.toString());
+                    moduleLayers.put(name, layer);
                 } else if (line.startsWith("allow ")) {
                     String rest = line.substring(6).strip();
                     String[] parts = rest.split("\\s*->\\s*", 2);
@@ -45,7 +59,8 @@ public final class BlueprintLoader {
 
             Map<String, Module> modules = new LinkedHashMap<>();
             for (Map.Entry<String, List<String>> e : modulePatterns.entrySet()) {
-                modules.put(e.getKey(), new Module(e.getKey(), e.getValue()));
+                int layer = moduleLayers.getOrDefault(e.getKey(), -1);
+                modules.put(e.getKey(), new Module(e.getKey(), e.getValue(), layer));
             }
 
             Set<Dependency> allowed = new HashSet<>();

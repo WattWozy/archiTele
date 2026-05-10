@@ -5,10 +5,12 @@ import dev.archtelemetry.adapter.git.SnapshotConfig;
 import dev.archtelemetry.adapter.java.JavaDependencyResolver;
 import dev.archtelemetry.application.AnalyzeHistory;
 import dev.archtelemetry.application.AnalyzeSnapshot;
+import dev.archtelemetry.application.ComputeMetrics;
 import dev.archtelemetry.application.HealthReport;
 import dev.archtelemetry.application.ReportHealth;
 import dev.archtelemetry.application.port.DependencyResolver;
 import dev.archtelemetry.application.port.SnapshotSource;
+import dev.archtelemetry.domain.ArchitectureProfile;
 import dev.archtelemetry.domain.Blueprint;
 import dev.archtelemetry.domain.Snapshot;
 import dev.archtelemetry.domain.Trend;
@@ -47,11 +49,15 @@ public final class Main {
 
         AnalyzeSnapshot analyzeSnapshot = new AnalyzeSnapshot();
         AnalyzeHistory analyzeHistory = new AnalyzeHistory(analyzeSnapshot);
+        ComputeMetrics computeMetrics = new ComputeMetrics(analyzeSnapshot);
         ReportHealth reportHealth = new ReportHealth();
 
         List<Snapshot> snapshots = snapshotSource.fetchSnapshots();
         Trend trend = analyzeHistory.analyze(blueprint, snapshots);
-        HealthReport report = reportHealth.report(trend);
+        List<ArchitectureProfile> profiles = snapshots.stream()
+                .map(s -> computeMetrics.compute(blueprint, s))
+                .toList();
+        HealthReport report = reportHealth.report(trend, profiles);
 
         HealthReportPrinter.print(trend, report, snapshots);
     }
