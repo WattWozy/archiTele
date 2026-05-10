@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" -Recurse -Force | Select-Object FullName, @{Name=\"Type\";Expression={if\\($_.PSIsContainer\\){\"DIR\"}else{\"FILE\"}}} | Format-Table -AutoSize)",
+      "Bash(mvn test *)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\\\\src\" -Recurse | Where-Object { -not $_.PSIsContainer } | Select-Object FullName)",
+      "PowerShell(head *)",
+      "PowerShell(choco list *)",
+      "PowerShell(Invoke-WebRequest -Uri \"https://repo1.maven.org/maven2/org/apache/maven/apache-maven/3.9.9/apache-maven-3.9.9-bin.zip\" -OutFile \"$env:TEMP\\\\mvn.zip\" -UseBasicParsing; Write-Host \"exit: $LASTEXITCODE\")",
+      "Bash(mvn package *)",
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT.jar --repo . --blueprint arch.blueprint)"
+    ]
+  }
+}
