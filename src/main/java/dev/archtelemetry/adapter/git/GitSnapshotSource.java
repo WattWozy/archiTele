@@ -1,6 +1,7 @@
 package dev.archtelemetry.adapter.git;
 
 import dev.archtelemetry.application.port.DependencyResolver;
+import dev.archtelemetry.application.port.ResolvedData;
 import dev.archtelemetry.application.port.SnapshotSource;
 import dev.archtelemetry.domain.Dependency;
 import dev.archtelemetry.domain.Snapshot;
@@ -87,9 +88,9 @@ public final class GitSnapshotSource implements SnapshotSource {
         Path tempDir = Files.createTempDirectory("archtelemetry-");
         try {
             Set<Path> javaFiles = extractJavaFiles(repo, commit, tempDir);
-            Set<Dependency> deps = resolver.resolve(javaFiles);
+            ResolvedData resolved = resolver.resolve(javaFiles);
             Instant ts = Instant.ofEpochSecond(commit.getCommitTime());
-            return new Snapshot(commit.getId().getName(), ts, deps);
+            return new Snapshot(commit.getId().getName(), ts, resolved.dependencies(), resolved.moduleWmc());
         } finally {
             deleteRecursive(tempDir);
         }

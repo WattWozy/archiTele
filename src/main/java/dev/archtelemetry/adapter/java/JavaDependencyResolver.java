@@ -1,6 +1,7 @@
 package dev.archtelemetry.adapter.java;
 
 import dev.archtelemetry.application.port.DependencyResolver;
+import dev.archtelemetry.application.port.ResolvedData;
 import dev.archtelemetry.domain.Dependency;
 import dev.archtelemetry.domain.Module;
 
@@ -8,7 +9,9 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -20,6 +23,11 @@ public final class JavaDependencyResolver implements DependencyResolver {
             "^\\s*package\\s+([\\w.]+)\\s*;", Pattern.MULTILINE);
     private static final Pattern IMPORT_DECL = Pattern.compile(
             "^\\s*import\\s+(?:static\\s+)?([\\w.*]+)\\s*;", Pattern.MULTILINE);
+    // Method declaration proxy: access modifier(s) + return type + name + '('
+    private static final Pattern METHOD_DECL = Pattern.compile(
+            "^\\s+(?:(?:public|protected|private|static|final|abstract|synchronized|native)\\s+)+"
+            + "[\\w<>\\[\\]]+\\s+\\w+\\s*\\([^;{]*\\)\\s*(?:throws[^{;]+)?\\{",
+            Pattern.MULTILINE);
 
     private final Set<Module> modules;
 
@@ -28,12 +36,17 @@ public final class JavaDependencyResolver implements DependencyResolver {
     }
 
     @Override
-    public Set<Dependency> resolve(Set<Path> sourceFiles) {
+    public ResolvedData resolve(Set<Path> sourceFiles) {
         Set<Dependency> dependencies = new HashSet<>();
+        Map<Module, Integer> moduleWmc = new HashMap<>();
+
         for (Path file : sourceFiles) {
             String source = readFile(file);
             Optional<Module> sourceModule = extractPackage(source).flatMap(this::resolveModuleByPackage);
             if (sourceModule.isEmpty()) continue;
+
+            int methodCount = countMethods(source);
+            moduleWmc.merge(sourceModule.get(), methodCount, Integer::sum);
 
             extractImports(source).stream()
                     .filter(imp -> !imp.startsWith("java.") && !imp.startsWith("javax."))
@@ -44,7 +57,14 @@ public final class JavaDependencyResolver implements DependencyResolver {
                     .map(target -> new Dependency(sourceModule.get(), target))
                     .forEach(dependencies::add);
         }
-        return Set.copyOf(dependencies);
+        return new ResolvedData(Set.copyOf(dependencies), Map.copyOf(moduleWmc));
+    }
+
+    private int countMethods(String source) {
+        Matcher m = METHOD_DECL.matcher(source);
+        int count = 0;
+        while (m.find()) count++;
+        return count;
     }
 
     private String readFile(Path path) {

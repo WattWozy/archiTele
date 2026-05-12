@@ -1,22 +1,29 @@
 package dev.archtelemetry.adapter.cli;
 
+import dev.archtelemetry.adapter.git.GitHistorySource;
 import dev.archtelemetry.adapter.git.GitSnapshotSource;
 import dev.archtelemetry.adapter.git.SnapshotConfig;
 import dev.archtelemetry.adapter.java.JavaDependencyResolver;
 import dev.archtelemetry.application.AnalyzeHistory;
 import dev.archtelemetry.application.AnalyzeSnapshot;
+import dev.archtelemetry.application.ComputeGitStats;
 import dev.archtelemetry.application.ComputeMetrics;
 import dev.archtelemetry.application.HealthReport;
 import dev.archtelemetry.application.ReportHealth;
 import dev.archtelemetry.application.port.DependencyResolver;
+import dev.archtelemetry.application.port.HistorySource;
 import dev.archtelemetry.application.port.SnapshotSource;
 import dev.archtelemetry.domain.ArchitectureProfile;
 import dev.archtelemetry.domain.Blueprint;
+import dev.archtelemetry.domain.CommitEntry;
+import dev.archtelemetry.domain.Module;
+import dev.archtelemetry.domain.ModuleGitStats;
 import dev.archtelemetry.domain.Snapshot;
 import dev.archtelemetry.domain.Trend;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 public final class Main {
 
@@ -46,16 +53,22 @@ public final class Main {
         DependencyResolver resolver = new JavaDependencyResolver(blueprint.modules());
         SnapshotSource snapshotSource = new GitSnapshotSource(
                 repoPath, resolver, new SnapshotConfig.LastN(commitCount));
+        HistorySource historySource = new GitHistorySource(
+                repoPath, new SnapshotConfig.LastN(commitCount));
 
         AnalyzeSnapshot analyzeSnapshot = new AnalyzeSnapshot();
         AnalyzeHistory analyzeHistory = new AnalyzeHistory(analyzeSnapshot);
         ComputeMetrics computeMetrics = new ComputeMetrics(analyzeSnapshot);
+        ComputeGitStats computeGitStats = new ComputeGitStats();
         ReportHealth reportHealth = new ReportHealth();
 
         List<Snapshot> snapshots = snapshotSource.fetchSnapshots();
+        List<CommitEntry> history = historySource.fetchHistory();
+        Map<Module, ModuleGitStats> gitStats = computeGitStats.compute(blueprint, history);
+
         Trend trend = analyzeHistory.analyze(blueprint, snapshots);
         List<ArchitectureProfile> profiles = snapshots.stream()
-                .map(s -> computeMetrics.compute(blueprint, s))
+                .map(s -> computeMetrics.compute(blueprint, s, gitStats))
                 .toList();
         HealthReport report = reportHealth.report(trend, profiles);
 

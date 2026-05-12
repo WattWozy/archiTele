@@ -7,6 +7,7 @@ import dev.archtelemetry.domain.ModuleMetrics;
 import dev.archtelemetry.domain.Snapshot;
 import dev.archtelemetry.domain.Trend;
 import dev.archtelemetry.domain.Violation;
+import dev.archtelemetry.domain.ViolationRecord;
 
 import java.util.Comparator;
 import java.util.List;
@@ -40,11 +41,14 @@ public final class HealthReportPrinter {
 
         if (report.latestProfile() != null) {
             System.out.println("--- Module Metrics (latest snapshot) ---");
-            System.out.printf("%-20s %6s %7s %11s%n", "Module", "Fan-In", "Fan-Out", "Instability");
+            System.out.printf("%-20s %6s %7s %11s %5s %9s %9s %9s  %s%n",
+                    "Module", "Fan-In", "Fan-Out", "Instability", "WMC", "Hotspot", "ChurnAcc", "BusFactor", "Flags");
             report.latestProfile().moduleMetrics().stream()
                     .sorted(Comparator.comparing(m -> m.module().name()))
-                    .forEach(m -> System.out.printf("%-20s %6d %7d %11.2f  %s%n",
-                            m.module().name(), m.fanIn(), m.fanOut(), m.instability(), moduleFlag(m)));
+                    .forEach(m -> System.out.printf("%-20s %6d %7d %11.2f %5d %9.1f %9.2f %9.2f  %s%n",
+                            m.module().name(), m.fanIn(), m.fanOut(), m.instability(),
+                            m.wmc(), m.hotspot(), m.churnAcceleration(), m.busFactorRisk(),
+                            moduleFlag(m)));
             System.out.println();
 
             System.out.println("--- Dependency Cycles ---");
@@ -98,6 +102,19 @@ public final class HealthReportPrinter {
                     .forEach(System.out::println);
         }
 
+        List<ViolationRecord> chronic = report.violationRecords().stream()
+                .filter(ViolationRecord::isChronic)
+                .sorted(Comparator.comparingInt(ViolationRecord::ageInSnapshots).reversed())
+                .toList();
+        if (!chronic.isEmpty()) {
+            System.out.println();
+            System.out.println("--- Chronic Violations (3+ snapshots) ---");
+            chronic.forEach(vr -> System.out.printf("  ⚠ %s -> %s  (%d snapshots)%n",
+                    vr.violation().dependency().source().name(),
+                    vr.violation().dependency().target().name(),
+                    vr.ageInSnapshots()));
+        }
+
         if (!report.instabilityWarnings().isEmpty()) {
             System.out.println();
             System.out.println("--- Instability Warnings ---");
@@ -110,6 +127,14 @@ public final class HealthReportPrinter {
     private static String moduleFlag(ModuleMetrics m) {
         int layer = m.module().layer();
         boolean highInstability = m.instability() > 0.5;
+        boolean isHotspot = m.hotspot() > 0 && m.hotspot() > 50;
+        boolean isBusFactor = m.busFactorRisk() > 5.0;
+
+        StringBuilder flags = new StringBuilder();
+        if (isHotspot) flags.append("⚠ hotspot ");
+        if (isBusFactor) flags.append("⚠ bus-factor ");
+        if (flags.length() > 0) return flags.toString().trim();
+
         if (layer < 0) {
             return highInstability ? "⚠ high coupling" : "";
         }

@@ -41,7 +41,7 @@ class JavaDependencyResolverTest {
                 class AppService {}
                 """);
 
-        assertEquals(Set.of(new Dependency(application, domain)), resolver.resolve(Set.of(f)));
+        assertEquals(Set.of(new Dependency(application, domain)), resolver.resolve(Set.of(f)).dependencies());
     }
 
     @Test
@@ -52,7 +52,7 @@ class JavaDependencyResolverTest {
                 class DomainService {}
                 """);
 
-        assertEquals(Set.of(new Dependency(domain, infrastructure)), resolver.resolve(Set.of(f)));
+        assertEquals(Set.of(new Dependency(domain, infrastructure)), resolver.resolve(Set.of(f)).dependencies());
     }
 
     @Test
@@ -64,7 +64,7 @@ class JavaDependencyResolverTest {
                 class OtherDomain {}
                 """);
 
-        assertTrue(resolver.resolve(Set.of(f)).isEmpty());
+        assertTrue(resolver.resolve(Set.of(f)).dependencies().isEmpty());
     }
 
     @Test
@@ -77,7 +77,7 @@ class JavaDependencyResolverTest {
                 class Util {}
                 """);
 
-        assertTrue(resolver.resolve(Set.of(f)).isEmpty());
+        assertTrue(resolver.resolve(Set.of(f)).dependencies().isEmpty());
     }
 
     @Test
@@ -87,7 +87,7 @@ class JavaDependencyResolverTest {
                 class Plain {}
                 """);
 
-        assertTrue(resolver.resolve(Set.of(f)).isEmpty());
+        assertTrue(resolver.resolve(Set.of(f)).dependencies().isEmpty());
     }
 
     @Test
@@ -108,7 +108,26 @@ class JavaDependencyResolverTest {
                         new Dependency(application, domain),
                         new Dependency(infrastructure, application)
                 ),
-                resolver.resolve(Set.of(appFile, infraFile))
+                resolver.resolve(Set.of(appFile, infraFile)).dependencies()
         );
+    }
+
+    @Test
+    void methodCountIsComputedPerModule() throws IOException {
+        Path f = file("AppService.java", """
+                package dev.archtelemetry.application;
+                import dev.archtelemetry.domain.Module;
+                class AppService {
+                    public void doSomething(String x) {
+                    }
+                    public int getValue() {
+                        return 42;
+                    }
+                }
+                """);
+
+        var resolved = resolver.resolve(Set.of(f));
+        int wmc = resolved.moduleWmc().getOrDefault(application, 0);
+        assertTrue(wmc >= 2, "Expected at least 2 methods, got " + wmc);
     }
 }

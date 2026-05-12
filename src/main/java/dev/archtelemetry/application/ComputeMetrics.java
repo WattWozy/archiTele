@@ -5,11 +5,14 @@ import dev.archtelemetry.domain.Dependency;
 import dev.archtelemetry.domain.DependencyCycle;
 import dev.archtelemetry.domain.Blueprint;
 import dev.archtelemetry.domain.Module;
+import dev.archtelemetry.domain.ModuleGitStats;
 import dev.archtelemetry.domain.ModuleMetrics;
 import dev.archtelemetry.domain.Snapshot;
 import dev.archtelemetry.domain.Violation;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -25,8 +28,13 @@ public final class ComputeMetrics {
     }
 
     public ArchitectureProfile compute(Blueprint blueprint, Snapshot snapshot) {
+        return compute(blueprint, snapshot, Map.of());
+    }
+
+    public ArchitectureProfile compute(Blueprint blueprint, Snapshot snapshot, Map<Module, ModuleGitStats> gitStats) {
         Set<Dependency> deps = snapshot.dependencies();
         Set<Module> modules = blueprint.modules();
+        Map<Module, Integer> wmcByModule = snapshot.moduleWmc();
 
         Set<ModuleMetrics> metricsSet = new HashSet<>();
         for (Module m : modules) {
@@ -36,7 +44,8 @@ public final class ComputeMetrics {
                 if (dep.source().equals(m)) fanOut++;
                 if (dep.target().equals(m)) fanIn++;
             }
-            metricsSet.add(ModuleMetrics.compute(m, fanIn, fanOut));
+            int wmc = wmcByModule.getOrDefault(m, 0);
+            metricsSet.add(ModuleMetrics.compute(m, fanIn, fanOut, wmc, gitStats.get(m)));
         }
 
         Set<DependencyCycle> cycles = detectCycles(new ArrayList<>(modules), deps);
@@ -54,36 +63,51 @@ public final class ComputeMetrics {
             }
         }
 
+        Map<Module, Integer> index = new HashMap<>();
+        Map<Module, Integer> lowlink = new HashMap<>();
+        Map<Module, Boolean> onStack = new HashMap<>();
+        Deque<Module> stack = new ArrayDeque<>();
         Set<DependencyCycle> cycles = new HashSet<>();
-        Map<Module, Color> color = new HashMap<>();
-        for (Module m : modules) color.put(m, Color.WHITE);
+        int[] counter = {0};
 
         for (Module m : modules) {
-            if (color.get(m) == Color.WHITE) {
-                dfs(m, adj, color, new ArrayList<>(), cycles);
+            if (!index.containsKey(m)) {
+                tarjan(m, adj, index, lowlink, onStack, stack, cycles, counter);
             }
         }
         return cycles;
     }
 
-    private enum Color { WHITE, GRAY, BLACK }
+    private void tarjan(Module v, Map<Module, Set<Module>> adj,
+                        Map<Module, Integer> index, Map<Module, Integer> lowlink,
+                        Map<Module, Boolean> onStack, Deque<Module> stack,
+                        Set<DependencyCycle> cycles, int[] counter) {
+        index.put(v, counter[0]);
+        lowlink.put(v, counter[0]);
+        counter[0]++;
+        stack.push(v);
+        onStack.put(v, true);
 
-    private void dfs(Module node, Map<Module, Set<Module>> adj, Map<Module, Color> color,
-                     List<Module> path, Set<DependencyCycle> cycles) {
-        color.put(node, Color.GRAY);
-        path.add(node);
-
-        for (Module neighbor : adj.getOrDefault(node, Set.of())) {
-            Color neighborColor = color.getOrDefault(neighbor, Color.BLACK);
-            if (neighborColor == Color.GRAY) {
-                int cycleStart = path.indexOf(neighbor);
-                cycles.add(new DependencyCycle(new ArrayList<>(path.subList(cycleStart, path.size()))));
-            } else if (neighborColor == Color.WHITE) {
-                dfs(neighbor, adj, color, path, cycles);
+        for (Module w : adj.getOrDefault(v, Set.of())) {
+            if (!index.containsKey(w)) {
+                tarjan(w, adj, index, lowlink, onStack, stack, cycles, counter);
+                lowlink.put(v, Math.min(lowlink.get(v), lowlink.get(w)));
+            } else if (Boolean.TRUE.equals(onStack.get(w))) {
+                lowlink.put(v, Math.min(lowlink.get(v), index.get(w)));
             }
         }
 
-        path.remove(path.size() - 1);
-        color.put(node, Color.BLACK);
+        if (lowlink.get(v).equals(index.get(v))) {
+            List<Module> scc = new ArrayList<>();
+            Module w;
+            do {
+                w = stack.pop();
+                onStack.put(w, false);
+                scc.add(w);
+            } while (!w.equals(v));
+            if (scc.size() >= 2) {
+                cycles.add(new DependencyCycle(scc));
+            }
+        }
     }
 }

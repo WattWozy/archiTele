@@ -5,6 +5,7 @@ import dev.archtelemetry.domain.DriftDirection;
 import dev.archtelemetry.domain.ModuleMetrics;
 import dev.archtelemetry.domain.Trend;
 import dev.archtelemetry.domain.Violation;
+import dev.archtelemetry.domain.ViolationRecord;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -18,6 +19,7 @@ public final class ReportHealth {
 
     private static final double INSTABILITY_THRESHOLD = 0.5;
     private static final int INNER_LAYER_MAX = 1;
+    private static final int CHRONIC_THRESHOLD = 3;
 
     public HealthReport report(Trend trend) {
         return report(trend, List.of());
@@ -28,7 +30,7 @@ public final class ReportHealth {
 
         if (entries.isEmpty()) {
             return new HealthReport(0, Set.of(), Set.of(), DriftDirection.STABLE,
-                    0, null, List.of(), List.of());
+                    0, null, List.of(), List.of(), List.of());
         }
 
         Trend.SnapshotEntry latest = entries.get(entries.size() - 1);
@@ -56,6 +58,7 @@ public final class ReportHealth {
         ArchitectureProfile latestProfile = profiles.isEmpty() ? null : profiles.get(profiles.size() - 1);
         List<InstabilityWarning> warnings = computeWarnings(latestProfile);
         List<ModuleInstabilityTrend> instabilityTrends = computeInstabilityTrends(profiles);
+        List<ViolationRecord> violationRecords = computeViolationRecords(entries);
 
         return new HealthReport(
                 latestViolations.size(),
@@ -65,8 +68,27 @@ public final class ReportHealth {
                 entries.size(),
                 latestProfile,
                 warnings,
-                instabilityTrends
+                instabilityTrends,
+                violationRecords
         );
+    }
+
+    private List<ViolationRecord> computeViolationRecords(List<Trend.SnapshotEntry> entries) {
+        if (entries.isEmpty()) return List.of();
+        Set<Violation> latest = entries.get(entries.size() - 1).violations();
+        List<ViolationRecord> records = new ArrayList<>();
+        for (Violation v : latest) {
+            int age = 0;
+            for (int i = entries.size() - 1; i >= 0; i--) {
+                if (entries.get(i).violations().contains(v)) {
+                    age++;
+                } else {
+                    break;
+                }
+            }
+            records.add(new ViolationRecord(v, age, age >= CHRONIC_THRESHOLD));
+        }
+        return Collections.unmodifiableList(records);
     }
 
     private List<InstabilityWarning> computeWarnings(ArchitectureProfile profile) {

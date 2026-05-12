@@ -6,12 +6,24 @@ public record ModuleMetrics(
         int fanOut,
         double instability,
         double abstractness,
-        double distanceFromMainSequence
+        double distanceFromMainSequence,
+        int wmc,
+        double hotspot,
+        double churnAcceleration,
+        double busFactorRisk
 ) {
     public static ModuleMetrics compute(Module module, int fanIn, int fanOut) {
+        return compute(module, fanIn, fanOut, 0, null);
+    }
+
+    public static ModuleMetrics compute(Module module, int fanIn, int fanOut, int wmc, ModuleGitStats gitStats) {
         double instability = (fanIn + fanOut) == 0 ? 0.0 : (double) fanOut / (fanIn + fanOut);
         double abstractness = 0.0;
         double distance = Math.abs(abstractness + instability - 1.0);
-        return new ModuleMetrics(module, fanIn, fanOut, instability, abstractness, distance);
+        double hotspot = gitStats != null ? (double) wmc * gitStats.commitCount() : 0.0;
+        double churnAcceleration = gitStats != null ? gitStats.churnAcceleration() : 0.0;
+        double busFactorRisk = gitStats != null ? gitStats.busFactorRisk() : 0.0;
+        return new ModuleMetrics(module, fanIn, fanOut, instability, abstractness, distance,
+                wmc, hotspot, churnAcceleration, busFactorRisk);
     }
 }
