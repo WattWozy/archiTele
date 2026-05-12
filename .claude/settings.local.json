@@ -10,7 +10,12 @@
       "PowerShell(choco list *)",
       "PowerShell(Invoke-WebRequest -Uri \"https://repo1.maven.org/maven2/org/apache/maven/apache-maven/3.9.9/apache-maven-3.9.9-bin.zip\" -OutFile \"$env:TEMP\\\\mvn.zip\" -UseBasicParsing; Write-Host \"exit: $LASTEXITCODE\")",
       "Bash(mvn package *)",
-      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT.jar --repo . --blueprint arch.blueprint)"
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT.jar --repo . --blueprint arch.blueprint)",
+      "Bash(xargs grep -h \"^package \")",
+      "Bash(xargs -I{} sh -c 'echo \"=== {} ===\"; head -5 {}')",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" -Recurse -File)",
+      "Bash(Select-Object FullName)",
+      "Bash(Sort-Object FullName)"
     ]
   }
 }
