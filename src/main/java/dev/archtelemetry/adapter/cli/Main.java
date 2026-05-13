@@ -90,13 +90,12 @@ public final class Main {
             default           -> Language.JAVA;
         };
 
-        // Resolver for watch/incremental: TypeScript needs sourceRoot, resolved later from srcDir/repo
-        // For normal mode: GitSnapshotSource creates per-snapshot TS resolvers via factory
-        // For watch/incremental: we build the resolver once the effective srcDir is known
+        // Blueprint patterns are always relative to the project root (repo root or CWD).
+        // --src controls what to scan, not the path prefix used in patterns.
+        Path projectRoot = repoPath != null ? repoPath : Path.of(".").toAbsolutePath().normalize();
         Path effectiveSrcDir = resolveSrcDir(repoPath, srcDir);
-        Path tsRoot = effectiveSrcDir != null ? effectiveSrcDir : Path.of(".");
         LocatingDependencyResolver resolver = switch (lang) {
-            case TYPESCRIPT -> new TypeScriptDependencyResolver(blueprint.modules(), tsRoot);
+            case TYPESCRIPT -> new TypeScriptDependencyResolver(blueprint.modules(), projectRoot);
             default         -> javaResolver;
         };
         String fileExt = lang == Language.TYPESCRIPT ? ".ts" : ".java";

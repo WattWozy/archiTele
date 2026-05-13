@@ -32,7 +32,10 @@
       "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --blueprint arch.blueprint --repo . --incremental)",
       "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --blueprint arch.blueprint --repo . --incremental --format ai-feedback)",
       "Bash(xargs -I {} basename {})",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --blueprint frontend.blueprint --watch --src frontend --language typescript --format ai-feedback)",
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --blueprint frontend.blueprint --language typescript --incremental --src frontend --changed frontend/domain/Entity.ts)",
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --blueprint frontend.blueprint --language typescript --incremental --repo . --changed frontend/domain/Entity.ts --format ai-feedback)"
     ]
   }
 }
