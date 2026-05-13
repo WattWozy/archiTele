@@ -1,12 +1,2 @@
+// Moved to dev.archtelemetry.application.port.LocatedDependency
 package dev.archtelemetry.adapter.java;
-
-import dev.archtelemetry.domain.Dependency;
-
-import java.nio.file.Path;
-
-public record LocatedDependency(
-        Dependency dependency,
-        Path sourceFile,
-        int lineNumber,
-        String importText
-) {}

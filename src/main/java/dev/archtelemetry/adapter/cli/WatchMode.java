@@ -1,7 +1,7 @@
 package dev.archtelemetry.adapter.cli;
 
-import dev.archtelemetry.adapter.java.JavaDependencyResolver;
-import dev.archtelemetry.adapter.java.ResolvedDataWithLocations;
+import dev.archtelemetry.application.port.LocatingDependencyResolver;
+import dev.archtelemetry.application.port.ResolvedDataWithLocations;
 import dev.archtelemetry.application.AnalyzeIncremental;
 import dev.archtelemetry.application.AnalyzeSnapshot;
 import dev.archtelemetry.application.IncrementalResult;
@@ -34,13 +34,16 @@ public final class WatchMode {
 
     private final Path sourceDir;
     private final Blueprint blueprint;
-    private final JavaDependencyResolver resolver;
+    private final LocatingDependencyResolver resolver;
+    private final String fileExtension;
     private final boolean aiFeedback;
 
-    public WatchMode(Path sourceDir, Blueprint blueprint, JavaDependencyResolver resolver, boolean aiFeedback) {
+    public WatchMode(Path sourceDir, Blueprint blueprint, LocatingDependencyResolver resolver,
+                     String fileExtension, boolean aiFeedback) {
         this.sourceDir = sourceDir;
         this.blueprint = blueprint;
         this.resolver = resolver;
+        this.fileExtension = fileExtension;
         this.aiFeedback = aiFeedback;
     }
 
@@ -48,12 +51,12 @@ public final class WatchMode {
         AnalyzeSnapshot analyzeSnapshot = new AnalyzeSnapshot();
         AnalyzeIncremental analyzeIncremental = new AnalyzeIncremental(resolver, analyzeSnapshot);
 
-        Set<Path> allFiles = WorkingTreeScanner.scanJavaFiles(sourceDir);
+        Set<Path> allFiles = WorkingTreeScanner.scanFiles(sourceDir, fileExtension);
         ResolvedData initial = resolver.resolve(allFiles);
         Snapshot current = new Snapshot("watch-init", Instant.now(), initial.dependencies(), initial.moduleWmc());
 
         System.err.println("[archtelemetry] Watching " + sourceDir
-                + " (" + allFiles.size() + " Java files, "
+                + " (" + allFiles.size() + " " + fileExtension + " files, "
                 + current.dependencies().size() + " dependencies)");
         if (aiFeedback) {
             System.err.println("[archtelemetry] Output: ai-feedback JSON (stdout)");
@@ -83,7 +86,7 @@ public final class WatchMode {
 
                 if (kind == ENTRY_CREATE && Files.isDirectory(fullPath)) {
                     registerAll(fullPath, watcher, keyDirMap);
-                } else if (fullPath.toString().endsWith(".java")) {
+                } else if (fullPath.toString().endsWith(fileExtension)) {
                     if (kind == ENTRY_DELETE) {
                         deleted.add(fullPath);
                     } else {
@@ -97,7 +100,7 @@ public final class WatchMode {
 
             // Deletions require full rescan to purge removed modules from graph
             if (!deleted.isEmpty()) {
-                Set<Path> remaining = WorkingTreeScanner.scanJavaFiles(sourceDir);
+                Set<Path> remaining = WorkingTreeScanner.scanFiles(sourceDir, fileExtension);
                 ResolvedData fullData = resolver.resolve(remaining);
                 current = new Snapshot("watch-rescan", Instant.now(), fullData.dependencies(), fullData.moduleWmc());
                 System.err.println("[archtelemetry] " + Instant.now() + " — "

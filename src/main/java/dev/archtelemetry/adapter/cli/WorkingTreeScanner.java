@@ -15,13 +15,21 @@ public final class WorkingTreeScanner {
     private WorkingTreeScanner() {}
 
     public static Set<Path> scanJavaFiles(Path rootDir) {
+        return scanFiles(rootDir, ".java");
+    }
+
+    public static Set<Path> scanFiles(Path rootDir, String... extensions) {
         Set<Path> files = new HashSet<>();
         try {
             Files.walkFileTree(rootDir, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (file.toString().endsWith(".java")) {
-                        files.add(file);
+                    String name = file.toString();
+                    for (String ext : extensions) {
+                        if (name.endsWith(ext)) {
+                            files.add(file);
+                            break;
+                        }
                     }
                     return FileVisitResult.CONTINUE;
                 }

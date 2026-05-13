@@ -1,8 +1,8 @@
 package dev.archtelemetry;
 
 import dev.archtelemetry.adapter.java.JavaDependencyResolver;
-import dev.archtelemetry.adapter.java.LocatedDependency;
-import dev.archtelemetry.adapter.java.ResolvedDataWithLocations;
+import dev.archtelemetry.application.port.LocatedDependency;
+import dev.archtelemetry.application.port.ResolvedDataWithLocations;
 import dev.archtelemetry.application.AnalyzeIncremental;
 import dev.archtelemetry.application.AnalyzeSnapshot;
 import dev.archtelemetry.application.IncrementalResult;

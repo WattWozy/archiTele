@@ -4,6 +4,7 @@ import dev.archtelemetry.application.port.DependencyResolver;
 import dev.archtelemetry.application.port.ResolvedData;
 import dev.archtelemetry.application.port.SnapshotSource;
 import dev.archtelemetry.domain.Dependency;
+import dev.archtelemetry.domain.Module;
 import dev.archtelemetry.domain.Snapshot;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.ObjectLoader;
@@ -22,19 +23,33 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 public final class GitSnapshotSource implements SnapshotSource {
 
     private final Path repoPath;
-    private final DependencyResolver resolver;
+    private final DependencyResolver javaResolver;
+    private final Function<Path, DependencyResolver> tsResolverFactory;
+    private final Language language;
     private final SnapshotConfig config;
 
+    /** Backward-compatible constructor for Java-only analysis. */
     public GitSnapshotSource(Path repoPath, DependencyResolver resolver, SnapshotConfig config) {
+        this(repoPath, resolver, null, Language.JAVA, config);
+    }
+
+    public GitSnapshotSource(Path repoPath, DependencyResolver javaResolver,
+                              Function<Path, DependencyResolver> tsResolverFactory,
+                              Language language, SnapshotConfig config) {
         this.repoPath = repoPath;
-        this.resolver = resolver;
+        this.javaResolver = javaResolver;
+        this.tsResolverFactory = tsResolverFactory;
+        this.language = language;
         this.config = config;
     }
 
@@ -87,8 +102,23 @@ public final class GitSnapshotSource implements SnapshotSource {
     private Snapshot snapshotFor(Repository repo, RevCommit commit) throws IOException {
         Path tempDir = Files.createTempDirectory("archtelemetry-");
         try {
-            Set<Path> javaFiles = extractJavaFiles(repo, commit, tempDir);
-            ResolvedData resolved = resolver.resolve(javaFiles);
+            ResolvedData resolved = switch (language) {
+                case JAVA -> {
+                    Set<Path> files = extractFiles(repo, commit, tempDir, ".java");
+                    yield javaResolver.resolve(files);
+                }
+                case TYPESCRIPT -> {
+                    Set<Path> files = extractFiles(repo, commit, tempDir, ".ts", ".tsx");
+                    yield tsResolverFactory.apply(tempDir).resolve(files);
+                }
+                case AUTO -> {
+                    Set<Path> javaFiles = extractFiles(repo, commit, tempDir, ".java");
+                    Set<Path> tsFiles = extractFiles(repo, commit, tempDir, ".ts", ".tsx");
+                    ResolvedData javaData = javaResolver.resolve(javaFiles);
+                    ResolvedData tsData = tsResolverFactory.apply(tempDir).resolve(tsFiles);
+                    yield mergeData(javaData, tsData);
+                }
+            };
             Instant ts = Instant.ofEpochSecond(commit.getCommitTime());
             return new Snapshot(commit.getId().getName(), ts, resolved.dependencies(), resolved.moduleWmc());
         } finally {
@@ -96,22 +126,33 @@ public final class GitSnapshotSource implements SnapshotSource {
         }
     }
 
-    private Set<Path> extractJavaFiles(Repository repo, RevCommit commit, Path tempDir) throws IOException {
+    private Set<Path> extractFiles(Repository repo, RevCommit commit, Path tempDir,
+                                    String... extensions) throws IOException {
         Set<Path> files = new HashSet<>();
-        try (TreeWalk treeWalk = new TreeWalk(repo)) {
-            treeWalk.addTree(commit.getTree());
-            treeWalk.setRecursive(true);
-            treeWalk.setFilter(PathSuffixFilter.create(".java"));
-            while (treeWalk.next()) {
-                String gitPath = treeWalk.getPathString();
-                ObjectLoader loader = repo.open(treeWalk.getObjectId(0));
-                Path target = resolvePath(tempDir, gitPath);
-                Files.createDirectories(target.getParent());
-                Files.write(target, loader.getBytes());
-                files.add(target);
+        for (String ext : extensions) {
+            try (TreeWalk treeWalk = new TreeWalk(repo)) {
+                treeWalk.addTree(commit.getTree());
+                treeWalk.setRecursive(true);
+                treeWalk.setFilter(PathSuffixFilter.create(ext));
+                while (treeWalk.next()) {
+                    String gitPath = treeWalk.getPathString();
+                    ObjectLoader loader = repo.open(treeWalk.getObjectId(0));
+                    Path target = resolvePath(tempDir, gitPath);
+                    Files.createDirectories(target.getParent());
+                    Files.write(target, loader.getBytes());
+                    files.add(target);
+                }
             }
         }
         return files;
+    }
+
+    private static ResolvedData mergeData(ResolvedData a, ResolvedData b) {
+        Set<Dependency> deps = new HashSet<>(a.dependencies());
+        deps.addAll(b.dependencies());
+        Map<Module, Integer> wmc = new HashMap<>(a.moduleWmc());
+        b.moduleWmc().forEach((m, c) -> wmc.merge(m, c, Integer::sum));
+        return new ResolvedData(Set.copyOf(deps), Map.copyOf(wmc));
     }
 
     private Path resolvePath(Path base, String gitPath) {

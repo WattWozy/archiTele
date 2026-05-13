@@ -2,9 +2,12 @@ package dev.archtelemetry.adapter.cli;
 
 import dev.archtelemetry.adapter.git.GitHistorySource;
 import dev.archtelemetry.adapter.git.GitSnapshotSource;
+import dev.archtelemetry.adapter.git.Language;
 import dev.archtelemetry.adapter.git.SnapshotConfig;
 import dev.archtelemetry.adapter.java.JavaDependencyResolver;
-import dev.archtelemetry.adapter.java.ResolvedDataWithLocations;
+import dev.archtelemetry.adapter.typescript.TypeScriptDependencyResolver;
+import dev.archtelemetry.application.port.LocatingDependencyResolver;
+import dev.archtelemetry.application.port.ResolvedDataWithLocations;
 import dev.archtelemetry.application.AnalyzeHistory;
 import dev.archtelemetry.application.AnalyzeIncremental;
 import dev.archtelemetry.application.AnalyzeSnapshot;
@@ -43,6 +46,7 @@ public final class Main {
         Path srcDir = null;
         int commitCount = 20;
         String format = "console";
+        String language = "java";
         List<String> failOnConditions = new ArrayList<>();
         boolean incrementalMode = false;
         boolean watchMode = false;
@@ -57,6 +61,7 @@ public final class Main {
                 case "--out"         -> outPath = Path.of(args[++i]);
                 case "--fail-on"     -> failOnConditions.add(args[++i]);
                 case "--src"         -> srcDir = Path.of(args[++i]);
+                case "--language"    -> language = args[++i];
                 case "--incremental" -> incrementalMode = true;
                 case "--watch"       -> watchMode = true;
                 case "--changed"     -> {
@@ -77,15 +82,32 @@ public final class Main {
         }
 
         Blueprint blueprint = BlueprintLoader.load(blueprintPath);
-        JavaDependencyResolver resolver = new JavaDependencyResolver(blueprint.modules());
+        JavaDependencyResolver javaResolver = new JavaDependencyResolver(blueprint.modules());
+
+        Language lang = switch (language) {
+            case "typescript" -> Language.TYPESCRIPT;
+            case "auto"       -> Language.AUTO;
+            default           -> Language.JAVA;
+        };
+
+        // Resolver for watch/incremental: TypeScript needs sourceRoot, resolved later from srcDir/repo
+        // For normal mode: GitSnapshotSource creates per-snapshot TS resolvers via factory
+        // For watch/incremental: we build the resolver once the effective srcDir is known
+        Path effectiveSrcDir = resolveSrcDir(repoPath, srcDir);
+        Path tsRoot = effectiveSrcDir != null ? effectiveSrcDir : Path.of(".");
+        LocatingDependencyResolver resolver = switch (lang) {
+            case TYPESCRIPT -> new TypeScriptDependencyResolver(blueprint.modules(), tsRoot);
+            default         -> javaResolver;
+        };
+        String fileExt = lang == Language.TYPESCRIPT ? ".ts" : ".java";
 
         if (watchMode) {
-            runWatch(blueprint, resolver, repoPath, srcDir, format);
+            runWatch(blueprint, resolver, repoPath, srcDir, fileExt, format);
             return;
         }
 
         if (incrementalMode) {
-            runIncremental(blueprint, resolver, repoPath, srcDir, changedFiles, format);
+            runIncremental(blueprint, resolver, repoPath, srcDir, changedFiles, fileExt, format);
             return;
         }
 
@@ -95,18 +117,21 @@ public final class Main {
             return;
         }
 
-        runNormal(blueprint, resolver, repoPath, commitCount, format, outPath, failOnConditions);
+        runNormal(blueprint, javaResolver, lang, blueprint.modules(), repoPath, commitCount, format, outPath, failOnConditions);
     }
 
     // -------------------------------------------------------------------------
     // Normal (git history) mode
     // -------------------------------------------------------------------------
 
-    private static void runNormal(Blueprint blueprint, JavaDependencyResolver resolver,
+    private static void runNormal(Blueprint blueprint, JavaDependencyResolver javaResolver,
+                                  Language lang, Set<Module> modules,
                                   Path repoPath, int commitCount, String format,
                                   Path outPath, List<String> failOnConditions) {
         GitSnapshotSource snapshotSource = new GitSnapshotSource(
-                repoPath, resolver, new SnapshotConfig.LastN(commitCount));
+                repoPath, javaResolver,
+                root -> new TypeScriptDependencyResolver(modules, root),
+                lang, new SnapshotConfig.LastN(commitCount));
         GitHistorySource historySource = new GitHistorySource(
                 repoPath, new SnapshotConfig.LastN(commitCount));
 
@@ -157,9 +182,9 @@ public final class Main {
     // Incremental mode — fast check of changed files against HEAD or working tree
     // -------------------------------------------------------------------------
 
-    private static void runIncremental(Blueprint blueprint, JavaDependencyResolver resolver,
+    private static void runIncremental(Blueprint blueprint, LocatingDependencyResolver resolver,
                                        Path repoPath, Path srcDir,
-                                       List<Path> changedFiles, String format) {
+                                       List<Path> changedFiles, String fileExt, String format) {
         // Derive source dir for working-tree baseline when no --repo
         Path effectiveSrcDir = resolveSrcDir(repoPath, srcDir);
 
@@ -178,7 +203,7 @@ public final class Main {
                 System.exit(1);
                 return;
             }
-            Set<Path> allFiles = WorkingTreeScanner.scanJavaFiles(effectiveSrcDir);
+            Set<Path> allFiles = WorkingTreeScanner.scanFiles(effectiveSrcDir, fileExt);
             ResolvedData data = resolver.resolve(allFiles);
             baseline = new Snapshot("baseline", Instant.now(), data.dependencies(), data.moduleWmc());
         }
@@ -232,8 +257,8 @@ public final class Main {
     // Watch mode — continuous incremental analysis via NIO WatchService
     // -------------------------------------------------------------------------
 
-    private static void runWatch(Blueprint blueprint, JavaDependencyResolver resolver,
-                                 Path repoPath, Path srcDir, String format) {
+    private static void runWatch(Blueprint blueprint, LocatingDependencyResolver resolver,
+                                 Path repoPath, Path srcDir, String fileExt, String format) {
         Path effectiveSrcDir = resolveSrcDir(repoPath, srcDir);
         if (effectiveSrcDir == null || !Files.isDirectory(effectiveSrcDir)) {
             System.err.println("--watch requires --src <source-dir> (or --repo with a src/main/java subdirectory)");
@@ -242,7 +267,7 @@ public final class Main {
         }
 
         boolean aiFeedback = "ai-feedback".equals(format);
-        WatchMode watchMode = new WatchMode(effectiveSrcDir, blueprint, resolver, aiFeedback);
+        WatchMode watchMode = new WatchMode(effectiveSrcDir, blueprint, resolver, fileExt, aiFeedback);
         try {
             watchMode.run();
         } catch (IOException e) {
@@ -341,6 +366,7 @@ public final class Main {
                   --commits <n>         Commits to analyze (default: 20)
                   --format <fmt>        console | json | markdown | html | ai-feedback
                   --out <file>          Write output to file (default: stdout)
+                  --language <lang>     java | typescript | auto (default: java)
                   --fail-on <cond>      Exit 1 on: new-violations, any-violations, new-cycles,
                                         instability-threshold=<N>, stale-blueprint
                   --src <dir>           Source directory for watch/incremental (default: <repo>/src/main/java)

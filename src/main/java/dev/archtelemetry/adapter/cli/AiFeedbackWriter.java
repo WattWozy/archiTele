@@ -1,6 +1,6 @@
 package dev.archtelemetry.adapter.cli;
 
-import dev.archtelemetry.adapter.java.LocatedDependency;
+import dev.archtelemetry.application.port.LocatedDependency;
 import dev.archtelemetry.domain.Blueprint;
 import dev.archtelemetry.domain.Violation;
 

@@ -1,7 +1,9 @@
 package dev.archtelemetry.adapter.java;
 
-import dev.archtelemetry.application.port.DependencyResolver;
+import dev.archtelemetry.application.port.LocatedDependency;
+import dev.archtelemetry.application.port.LocatingDependencyResolver;
 import dev.archtelemetry.application.port.ResolvedData;
+import dev.archtelemetry.application.port.ResolvedDataWithLocations;
 import dev.archtelemetry.domain.Dependency;
 import dev.archtelemetry.domain.Module;
 
@@ -19,7 +21,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public final class JavaDependencyResolver implements DependencyResolver {
+public final class JavaDependencyResolver implements LocatingDependencyResolver {
 
     private static final Pattern PACKAGE_DECL = Pattern.compile(
             "^\\s*package\\s+([\\w.]+)\\s*;", Pattern.MULTILINE);
@@ -93,8 +95,7 @@ public final class JavaDependencyResolver implements DependencyResolver {
             }
         }
 
-        var data = new dev.archtelemetry.application.port.ResolvedData(
-                Set.copyOf(dependencies), Map.copyOf(moduleWmc));
+        ResolvedData data = new ResolvedData(Set.copyOf(dependencies), Map.copyOf(moduleWmc));
         return new ResolvedDataWithLocations(data, List.copyOf(located));
     }
 
