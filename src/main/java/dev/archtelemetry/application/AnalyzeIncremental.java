@@ -50,7 +50,12 @@ public final class AnalyzeIncremental {
         touchedModules.forEach(mergedWmc::remove);
         newData.moduleWmc().forEach((m, wmc) -> mergedWmc.merge(m, wmc, Integer::sum));
 
-        Snapshot updatedSnapshot = new Snapshot("incremental", Instant.now(), merged, Map.copyOf(mergedWmc));
+        Map<Module, Double> mergedAbstractness = new HashMap<>(previousSnapshot.moduleAbstractness());
+        touchedModules.forEach(mergedAbstractness::remove);
+        mergedAbstractness.putAll(newData.moduleAbstractness());
+
+        Snapshot updatedSnapshot = new Snapshot("incremental", Instant.now(), merged,
+                Map.copyOf(mergedWmc), Map.copyOf(mergedAbstractness));
 
         Set<Violation> previousViolations = analyzeSnapshot.analyze(blueprint, previousSnapshot);
         Set<Violation> allViolations = analyzeSnapshot.analyze(blueprint, updatedSnapshot);

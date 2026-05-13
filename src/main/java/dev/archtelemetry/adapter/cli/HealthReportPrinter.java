@@ -2,8 +2,10 @@ package dev.archtelemetry.adapter.cli;
 
 import dev.archtelemetry.application.HealthReport;
 import dev.archtelemetry.application.InstabilityWarning;
+import dev.archtelemetry.domain.ArchitectureCommunity;
 import dev.archtelemetry.domain.DriftDirection;
 import dev.archtelemetry.domain.ModuleMetrics;
+import dev.archtelemetry.domain.RefactoringSuggestion;
 import dev.archtelemetry.domain.Snapshot;
 import dev.archtelemetry.domain.StaleModuleWarning;
 import dev.archtelemetry.domain.Trend;
@@ -55,15 +57,45 @@ public final class HealthReportPrinter {
 
         if (report.latestProfile() != null) {
             System.out.println("--- Module Metrics (latest snapshot) ---");
-            System.out.printf("%-20s %6s %7s %11s %5s %9s %9s %9s  %s%n",
-                    "Module", "Fan-In", "Fan-Out", "Instability", "WMC", "Hotspot", "ChurnAcc", "BusFactor", "Flags");
+            System.out.printf("%-20s %6s %7s %11s %5s %11s %8s %9s %9s %9s  %s%n",
+                    "Module", "Fan-In", "Fan-Out", "Instability", "WMC",
+                    "Abstractness", "Distance", "Hotspot", "ChurnAcc", "BusFactor", "Flags");
             report.latestProfile().moduleMetrics().stream()
                     .sorted(Comparator.comparing(m -> m.module().name()))
-                    .forEach(m -> System.out.printf("%-20s %6d %7d %11.2f %5d %9.1f %9.2f %9.2f  %s%n",
+                    .forEach(m -> System.out.printf("%-20s %6d %7d %11.2f %5d %11.2f %8.2f %9.1f %9.2f %9.2f  %s%n",
                             m.module().name(), m.fanIn(), m.fanOut(), m.instability(),
-                            m.wmc(), m.hotspot(), m.churnAcceleration(), m.busFactorRisk(),
+                            m.wmc(), m.abstractness(), m.distanceFromMainSequence(),
+                            m.hotspot(), m.churnAcceleration(), m.busFactorRisk(),
                             moduleFlag(m)));
             System.out.println();
+
+            if (!report.latestProfile().refactoringSuggestions().isEmpty()) {
+                System.out.println("--- Refactoring Suggestions ---");
+                report.latestProfile().refactoringSuggestions().forEach(s -> {
+                    String tag = s.type() == RefactoringSuggestion.Type.SPLIT ? "SPLIT" : "MERGE";
+                    System.out.printf("  [%s] %s: %s%n", tag, s.module().name(), s.reason());
+                });
+                System.out.println();
+            }
+
+            Set<ArchitectureCommunity> communities = report.latestProfile().communities();
+            if (!communities.isEmpty()) {
+                System.out.println("--- Architecture Communities ---");
+                communities.stream()
+                        .sorted(Comparator.comparing(c -> -c.modules().size()))
+                        .forEach(c -> {
+                            String members = c.modules().stream()
+                                    .map(m -> m.name())
+                                    .sorted()
+                                    .collect(Collectors.joining(", "));
+                            boolean crossLayer = c.modules().stream()
+                                    .mapToInt(m -> m.layer())
+                                    .distinct().count() > 1;
+                            String note = crossLayer ? "  ⚠ cross-layer coupling" : "";
+                            System.out.printf("  [%d] %s%s%n", c.modules().size(), members, note);
+                        });
+                System.out.println();
+            }
 
             System.out.println("--- Dependency Cycles ---");
             if (report.latestProfile().cycles().isEmpty()) {

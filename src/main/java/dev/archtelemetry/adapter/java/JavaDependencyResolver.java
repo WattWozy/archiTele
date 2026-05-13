@@ -32,6 +32,14 @@ public final class JavaDependencyResolver implements LocatingDependencyResolver 
             "^\\s+(?:(?:public|protected|private|static|final|abstract|synchronized|native)\\s+)+"
             + "[\\w<>\\[\\]]+\\s+\\w+\\s*\\([^;{]*\\)\\s*(?:throws[^{;]+)?\\{",
             Pattern.MULTILINE);
+    // Counts interfaces and abstract classes (abstract types)
+    private static final Pattern ABSTRACT_TYPE_DECL = Pattern.compile(
+            "^[^/\n]*\\b(?:interface|abstract\\s+class)\\s+\\w+",
+            Pattern.MULTILINE);
+    // Counts all type declarations (class, interface, enum, record)
+    private static final Pattern TYPE_DECL = Pattern.compile(
+            "^[^/\n]*\\b(?:class|interface|enum|record)\\s+\\w+",
+            Pattern.MULTILINE);
 
     private final Set<Module> modules;
 
@@ -43,14 +51,18 @@ public final class JavaDependencyResolver implements LocatingDependencyResolver 
     public ResolvedData resolve(Set<Path> sourceFiles) {
         Set<Dependency> dependencies = new HashSet<>();
         Map<Module, Integer> moduleWmc = new HashMap<>();
+        Map<Module, int[]> typeCounts = new HashMap<>(); // [totalTypes, abstractTypes]
 
         for (Path file : sourceFiles) {
             String source = readFile(file);
             Optional<Module> sourceModule = extractPackage(source).flatMap(this::resolveModuleByPackage);
             if (sourceModule.isEmpty()) continue;
 
-            int methodCount = countMethods(source);
-            moduleWmc.merge(sourceModule.get(), methodCount, Integer::sum);
+            moduleWmc.merge(sourceModule.get(), countMethods(source), Integer::sum);
+
+            int[] counts = typeCounts.computeIfAbsent(sourceModule.get(), k -> new int[]{0, 0});
+            counts[0] += countTypes(source);
+            counts[1] += countAbstractTypes(source);
 
             extractImports(source).stream()
                     .filter(imp -> !imp.startsWith("java.") && !imp.startsWith("javax."))
@@ -61,16 +73,19 @@ public final class JavaDependencyResolver implements LocatingDependencyResolver 
                     .map(target -> new Dependency(sourceModule.get(), target))
                     .forEach(dependencies::add);
         }
-        return new ResolvedData(Set.copyOf(dependencies), Map.copyOf(moduleWmc));
+
+        Map<Module, Double> moduleAbstractness = new HashMap<>();
+        typeCounts.forEach((m, c) ->
+                moduleAbstractness.put(m, c[0] == 0 ? 0.0 : (double) c[1] / c[0]));
+
+        return new ResolvedData(Set.copyOf(dependencies), Map.copyOf(moduleWmc),
+                Map.copyOf(moduleAbstractness));
     }
 
-    /**
-     * Like resolve(), but also captures source file and line number for each dependency.
-     * Used by --format ai-feedback and watch mode.
-     */
     public ResolvedDataWithLocations resolveWithLocations(Set<Path> sourceFiles) {
         Set<Dependency> dependencies = new HashSet<>();
         Map<Module, Integer> moduleWmc = new HashMap<>();
+        Map<Module, int[]> typeCounts = new HashMap<>();
         List<LocatedDependency> located = new ArrayList<>();
 
         for (Path file : sourceFiles) {
@@ -78,8 +93,11 @@ public final class JavaDependencyResolver implements LocatingDependencyResolver 
             Optional<Module> sourceModule = extractPackage(source).flatMap(this::resolveModuleByPackage);
             if (sourceModule.isEmpty()) continue;
 
-            int methodCount = countMethods(source);
-            moduleWmc.merge(sourceModule.get(), methodCount, Integer::sum);
+            moduleWmc.merge(sourceModule.get(), countMethods(source), Integer::sum);
+
+            int[] counts = typeCounts.computeIfAbsent(sourceModule.get(), k -> new int[]{0, 0});
+            counts[0] += countTypes(source);
+            counts[1] += countAbstractTypes(source);
 
             for (Map.Entry<String, Integer> entry : extractImportsWithLines(source)) {
                 String imp = entry.getKey();
@@ -95,7 +113,12 @@ public final class JavaDependencyResolver implements LocatingDependencyResolver 
             }
         }
 
-        ResolvedData data = new ResolvedData(Set.copyOf(dependencies), Map.copyOf(moduleWmc));
+        Map<Module, Double> moduleAbstractness = new HashMap<>();
+        typeCounts.forEach((m, c) ->
+                moduleAbstractness.put(m, c[0] == 0 ? 0.0 : (double) c[1] / c[0]));
+
+        ResolvedData data = new ResolvedData(Set.copyOf(dependencies), Map.copyOf(moduleWmc),
+                Map.copyOf(moduleAbstractness));
         return new ResolvedDataWithLocations(data, List.copyOf(located));
     }
 
@@ -113,6 +136,20 @@ public final class JavaDependencyResolver implements LocatingDependencyResolver 
 
     private int countMethods(String source) {
         Matcher m = METHOD_DECL.matcher(source);
+        int count = 0;
+        while (m.find()) count++;
+        return count;
+    }
+
+    private int countTypes(String source) {
+        Matcher m = TYPE_DECL.matcher(source);
+        int count = 0;
+        while (m.find()) count++;
+        return count;
+    }
+
+    private int countAbstractTypes(String source) {
+        Matcher m = ABSTRACT_TYPE_DECL.matcher(source);
         int count = 0;
         while (m.find()) count++;
         return count;

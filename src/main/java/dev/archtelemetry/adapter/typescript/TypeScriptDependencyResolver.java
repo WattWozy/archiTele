@@ -35,6 +35,15 @@ public final class TypeScriptDependencyResolver implements LocatingDependencyRes
     private static final Pattern REQUIRE = Pattern.compile(
             "\\brequire\\(['\"]([^'\"]+)['\"]\\)");
 
+    // Abstract types: interfaces and abstract classes
+    private static final Pattern TS_ABSTRACT_TYPE_DECL = Pattern.compile(
+            "^[^/\n]*\\b(?:interface|abstract\\s+class)\\s+\\w+",
+            Pattern.MULTILINE);
+    // All type declarations: class, interface, type alias, enum
+    private static final Pattern TS_TYPE_DECL = Pattern.compile(
+            "^[^/\n]*\\b(?:class|interface|type|enum)\\s+\\w+",
+            Pattern.MULTILINE);
+
     // Function/method count proxy
     private static final Pattern FUNCTION_DECL = Pattern.compile(
             // named function declarations
@@ -64,6 +73,7 @@ public final class TypeScriptDependencyResolver implements LocatingDependencyRes
     public ResolvedDataWithLocations resolveWithLocations(Set<Path> sourceFiles) {
         Set<Dependency> dependencies = new HashSet<>();
         Map<Module, Integer> moduleWmc = new HashMap<>();
+        Map<Module, int[]> typeCounts = new HashMap<>(); // [totalTypes, abstractTypes]
         List<LocatedDependency> located = new ArrayList<>();
 
         for (Path file : sourceFiles) {
@@ -79,6 +89,10 @@ public final class TypeScriptDependencyResolver implements LocatingDependencyRes
 
             moduleWmc.merge(sourceModule.get(), countFunctions(source), Integer::sum);
 
+            int[] counts = typeCounts.computeIfAbsent(sourceModule.get(), k -> new int[]{0, 0});
+            counts[0] += countTsTypes(source);
+            counts[1] += countTsAbstractTypes(source);
+
             for (Map.Entry<String, Integer> entry : extractImportsWithLines(source)) {
                 String importPath = entry.getKey();
                 int lineNum = entry.getValue();
@@ -92,7 +106,12 @@ public final class TypeScriptDependencyResolver implements LocatingDependencyRes
             }
         }
 
-        ResolvedData data = new ResolvedData(Set.copyOf(dependencies), Map.copyOf(moduleWmc));
+        Map<Module, Double> moduleAbstractness = new HashMap<>();
+        typeCounts.forEach((m, c) ->
+                moduleAbstractness.put(m, c[0] == 0 ? 0.0 : (double) c[1] / c[0]));
+
+        ResolvedData data = new ResolvedData(Set.copyOf(dependencies), Map.copyOf(moduleWmc),
+                Map.copyOf(moduleAbstractness));
         return new ResolvedDataWithLocations(data, List.copyOf(located));
     }
 
@@ -146,6 +165,20 @@ public final class TypeScriptDependencyResolver implements LocatingDependencyRes
 
     private int countFunctions(String source) {
         Matcher m = FUNCTION_DECL.matcher(source);
+        int count = 0;
+        while (m.find()) count++;
+        return count;
+    }
+
+    private int countTsTypes(String source) {
+        Matcher m = TS_TYPE_DECL.matcher(source);
+        int count = 0;
+        while (m.find()) count++;
+        return count;
+    }
+
+    private int countTsAbstractTypes(String source) {
+        Matcher m = TS_ABSTRACT_TYPE_DECL.matcher(source);
         int count = 0;
         while (m.find()) count++;
         return count;

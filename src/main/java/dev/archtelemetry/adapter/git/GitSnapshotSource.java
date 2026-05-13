@@ -120,7 +120,8 @@ public final class GitSnapshotSource implements SnapshotSource {
                 }
             };
             Instant ts = Instant.ofEpochSecond(commit.getCommitTime());
-            return new Snapshot(commit.getId().getName(), ts, resolved.dependencies(), resolved.moduleWmc());
+            return new Snapshot(commit.getId().getName(), ts, resolved.dependencies(),
+                    resolved.moduleWmc(), resolved.moduleAbstractness());
         } finally {
             deleteRecursive(tempDir);
         }
@@ -152,7 +153,9 @@ public final class GitSnapshotSource implements SnapshotSource {
         deps.addAll(b.dependencies());
         Map<Module, Integer> wmc = new HashMap<>(a.moduleWmc());
         b.moduleWmc().forEach((m, c) -> wmc.merge(m, c, Integer::sum));
-        return new ResolvedData(Set.copyOf(deps), Map.copyOf(wmc));
+        Map<Module, Double> abstractness = new HashMap<>(a.moduleAbstractness());
+        abstractness.putAll(b.moduleAbstractness());
+        return new ResolvedData(Set.copyOf(deps), Map.copyOf(wmc), Map.copyOf(abstractness));
     }
 
     private Path resolvePath(Path base, String gitPath) {

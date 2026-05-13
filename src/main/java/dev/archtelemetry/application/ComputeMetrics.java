@@ -1,5 +1,6 @@
 package dev.archtelemetry.application;
 
+import dev.archtelemetry.domain.ArchitectureCommunity;
 import dev.archtelemetry.domain.ArchitectureProfile;
 import dev.archtelemetry.domain.Dependency;
 import dev.archtelemetry.domain.DependencyCycle;
@@ -7,6 +8,7 @@ import dev.archtelemetry.domain.Blueprint;
 import dev.archtelemetry.domain.Module;
 import dev.archtelemetry.domain.ModuleGitStats;
 import dev.archtelemetry.domain.ModuleMetrics;
+import dev.archtelemetry.domain.RefactoringSuggestion;
 import dev.archtelemetry.domain.Snapshot;
 import dev.archtelemetry.domain.Violation;
 
@@ -18,6 +20,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public final class ComputeMetrics {
 
@@ -35,6 +38,7 @@ public final class ComputeMetrics {
         Set<Dependency> deps = snapshot.dependencies();
         Set<Module> modules = blueprint.modules();
         Map<Module, Integer> wmcByModule = snapshot.moduleWmc();
+        Map<Module, Double> abstractnessByModule = snapshot.moduleAbstractness();
 
         Set<ModuleMetrics> metricsSet = new HashSet<>();
         for (Module m : modules) {
@@ -45,13 +49,57 @@ public final class ComputeMetrics {
                 if (dep.target().equals(m)) fanIn++;
             }
             int wmc = wmcByModule.getOrDefault(m, 0);
-            metricsSet.add(ModuleMetrics.compute(m, fanIn, fanOut, wmc, gitStats.get(m)));
+            double abstractness = abstractnessByModule.getOrDefault(m, 0.0);
+            metricsSet.add(ModuleMetrics.compute(m, fanIn, fanOut, wmc, gitStats.get(m), abstractness));
         }
 
         Set<DependencyCycle> cycles = detectCycles(new ArrayList<>(modules), deps);
         Set<Violation> violations = analyzeSnapshot.analyze(blueprint, snapshot);
+        List<RefactoringSuggestion> suggestions = new SuggestRefactorings().suggest(metricsSet, deps);
+        Set<ArchitectureCommunity> communities = detectCommunities(modules, deps);
 
-        return new ArchitectureProfile(metricsSet, cycles, violations);
+        return new ArchitectureProfile(metricsSet, cycles, violations, suggestions, communities);
+    }
+
+    private Set<ArchitectureCommunity> detectCommunities(Set<Module> modules, Set<Dependency> deps) {
+        Map<Module, Module> parent = new HashMap<>();
+        for (Module m : modules) parent.put(m, m);
+
+        for (Dependency dep : deps) {
+            if (modules.contains(dep.source()) && modules.contains(dep.target())) {
+                union(parent, dep.source(), dep.target());
+            }
+        }
+
+        Map<Module, Set<Module>> groups = new HashMap<>();
+        for (Module m : modules) {
+            Module root = find(parent, m);
+            groups.computeIfAbsent(root, k -> new HashSet<>()).add(m);
+        }
+
+        return groups.values().stream()
+                .map(group -> new ArchitectureCommunity(group, communityName(group)))
+                .collect(Collectors.toSet());
+    }
+
+    private Module find(Map<Module, Module> parent, Module m) {
+        if (!parent.get(m).equals(m)) {
+            parent.put(m, find(parent, parent.get(m)));
+        }
+        return parent.get(m);
+    }
+
+    private void union(Map<Module, Module> parent, Module a, Module b) {
+        Module ra = find(parent, a);
+        Module rb = find(parent, b);
+        if (!ra.equals(rb)) parent.put(ra, rb);
+    }
+
+    private String communityName(Set<Module> modules) {
+        return modules.stream()
+                .map(Module::name)
+                .sorted()
+                .collect(Collectors.joining(", ", "cluster(", ")"));
     }
 
     private Set<DependencyCycle> detectCycles(List<Module> modules, Set<Dependency> deps) {

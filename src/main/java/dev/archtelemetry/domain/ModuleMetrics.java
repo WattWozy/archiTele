@@ -13,12 +13,16 @@ public record ModuleMetrics(
         double busFactorRisk
 ) {
     public static ModuleMetrics compute(Module module, int fanIn, int fanOut) {
-        return compute(module, fanIn, fanOut, 0, null);
+        return compute(module, fanIn, fanOut, 0, null, 0.0);
     }
 
     public static ModuleMetrics compute(Module module, int fanIn, int fanOut, int wmc, ModuleGitStats gitStats) {
+        return compute(module, fanIn, fanOut, wmc, gitStats, 0.0);
+    }
+
+    public static ModuleMetrics compute(Module module, int fanIn, int fanOut, int wmc, ModuleGitStats gitStats,
+                                        double abstractness) {
         double instability = (fanIn + fanOut) == 0 ? 0.0 : (double) fanOut / (fanIn + fanOut);
-        double abstractness = 0.0;
         double distance = Math.abs(abstractness + instability - 1.0);
         double hotspot = gitStats != null ? (double) wmc * gitStats.commitCount() : 0.0;
         double churnAcceleration = gitStats != null ? gitStats.churnAcceleration() : 0.0;
