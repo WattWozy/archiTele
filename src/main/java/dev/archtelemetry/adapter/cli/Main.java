@@ -21,6 +21,8 @@ import dev.archtelemetry.domain.ModuleGitStats;
 import dev.archtelemetry.domain.Snapshot;
 import dev.archtelemetry.domain.Trend;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -30,13 +32,17 @@ public final class Main {
     public static void main(String[] args) {
         Path repoPath = null;
         Path blueprintPath = null;
+        Path outPath = null;
         int commitCount = 20;
+        String format = "console";
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
                 case "--repo" -> repoPath = Path.of(args[++i]);
                 case "--blueprint" -> blueprintPath = Path.of(args[++i]);
                 case "--commits" -> commitCount = Integer.parseInt(args[++i]);
+                case "--format" -> format = args[++i];
+                case "--out" -> outPath = Path.of(args[++i]);
                 default -> {
                     System.err.println("Unknown argument: " + args[i]);
                     printUsage();
@@ -72,11 +78,34 @@ public final class Main {
                 .toList();
         HealthReport report = reportHealth.report(trend, profiles);
 
-        HealthReportPrinter.print(trend, report, snapshots);
+        switch (format) {
+            case "console" -> HealthReportPrinter.print(trend, report, snapshots);
+            case "json" -> writeOutput(JsonReportWriter.generate(trend, report, snapshots), outPath);
+            case "markdown" -> writeOutput(MarkdownReportWriter.generate(trend, report, snapshots), outPath);
+            case "html" -> writeOutput(HtmlReportWriter.generate(trend, report, snapshots), outPath);
+            default -> {
+                System.err.println("Unknown format: " + format + ". Valid values: console, json, markdown, html");
+                System.exit(1);
+            }
+        }
+    }
+
+    private static void writeOutput(String content, Path outPath) {
+        if (outPath == null) {
+            System.out.print(content);
+        } else {
+            try {
+                Files.writeString(outPath, content);
+                System.err.println("Report written to: " + outPath);
+            } catch (IOException e) {
+                System.err.println("Failed to write report: " + e.getMessage());
+                System.exit(1);
+            }
+        }
     }
 
     private static void printUsage() {
-        System.err.println("Usage: archtelemetry --repo <path> --blueprint <path> [--commits <n>]");
+        System.err.println("Usage: archtelemetry --repo <path> --blueprint <path> [--commits <n>] [--format console|json|markdown|html] [--out <file>]");
         System.exit(1);
     }
 }

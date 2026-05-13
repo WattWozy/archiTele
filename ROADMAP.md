@@ -1,6 +1,6 @@
 # ArchTelemetry Roadmap
 
-**Product thesis:** Single-binary CLI for architectural observability. Zero infrastructure — no Neo4j, no Docker. One binary, one `.blueprint` file, immediate value. Language support is a plugin; Java is first.
+**Product thesis:** Architectural governance layer for AI-assisted development. The blueprint declares architectural intent — module boundaries, dependency directions, layering. The tool enforces those invariants continuously, whether code is written by humans or AI. Design principle: open for generation, closed by architectural invariants. Zero infrastructure — single binary, one `.blueprint` file, immediate value. Language support is a plugin; Java is first.
 
 **Current baseline (v0.1 — done):**
 - Hexagonal architecture: domain, application, adapter rings clean
@@ -130,11 +130,54 @@ Warn if a declared module matches zero files in the scanned commit.
 
 ---
 
-## Phase 4 — Second language plugin (prove the architecture)
+## Phase 3.5 — AI Development Harness
+
+**Value:** Closes the feedback loop between AI code generation and architectural governance. AI agents generate freely within the boundaries; violations are caught and fed back before a human reviews.
+
+### 3.5.1 Fast incremental analysis mode
+
+The current full-scan (walk git history, parse all files) is too slow for an AI feedback loop. Add an incremental mode that only analyzes changed files against the existing dependency graph.
+
+- **Application:** New use case `AnalyzeIncremental` — takes a set of changed file paths, the current `Blueprint`, and the previous `Snapshot`'s dependency graph. Re-resolves only the changed files, merges into the existing graph, returns new violations introduced by the changes only.
+- **Adapter (cli):** `--incremental` flag that accepts a list of changed files via stdin or as arguments. Returns violations in under 2 seconds for typical changesets.
+- **DoD:** Incremental analysis of 5 changed files in a 500-file project completes in under 2 seconds. Result matches what a full scan would produce for those files.
+
+### 3.5.2 Machine-readable violation output for AI consumption
+
+AI agents need structured, actionable feedback — not human-readable reports.
+
+- **Adapter (cli):** `--format ai-feedback` flag. Output is a JSON array where each violation includes: the source file and line number of the offending import, the source module and target module, the blueprint rule being violated, and a suggested fix (e.g. "move this dependency to the adapter layer" or "inject via port interface instead of direct import").
+- The suggested fix is derived from the blueprint rules — not AI-generated. It's deterministic: if domain imports from infrastructure, the fix is always "this dependency must be inverted — declare a port in application, implement in infrastructure."
+- **DoD:** Output is parseable by any AI agent. Each violation is self-contained with enough context for the AI to fix it without additional queries.
+
+### 3.5.3 Watch mode for continuous feedback
+
+- **Adapter (cli):** `--watch` flag. Monitors the source directory for file changes (Java NIO `WatchService`). On each change, runs incremental analysis and prints violations to stdout. Designed to be piped into an AI agent's input stream.
+- **DoD:** Save a file that introduces a violation, see the violation reported within 1 second.
+
+### 3.5.4 AI agent integration protocol
+
+Define a simple protocol for AI coding tools to integrate with ArchTelemetry:
+
+- The AI agent runs `archtelemetry --watch --format ai-feedback` in a subprocess
+- The agent writes code freely
+- On each file save, ArchTelemetry emits any new violations as structured JSON
+- The agent reads the violations and self-corrects before committing
+- Zero violations = safe to commit
+
+Document this protocol with examples for Claude Code, Cursor, and generic subprocess integration. The protocol is tool-agnostic — any AI agent that can read stdout can use it.
+
+**DoD:** A documented integration example where Claude Code generates code, receives violation feedback, and self-corrects, producing a clean commit.
+
+**Phase 3.5 definition of done:** Incremental analysis completes in under 2 seconds. `--format ai-feedback` output is parseable JSON with actionable fix hints. Watch mode emits violations within 1 second of a file save. Integration protocol documented with working examples.
+
+---
+
+## Phase 5 — Second language plugin (prove the architecture)
 
 **Value:** Validates that the domain is truly language-agnostic. Unlocks JS/TS monorepos.
 
-### 4.1 TypeScript/JavaScript DependencyResolver
+### 5.1 TypeScript/JavaScript DependencyResolver
 
 - **Application port:** `DependencyResolver` interface unchanged — takes `Set<Path>`, returns `Set<Dependency>`. Language plugin = one new class.
 - **Adapter (ts):** `TypeScriptDependencyResolver`. Parses `import ... from '...'` and `require('...')` statements via regex. Maps import paths to modules via blueprint package patterns (reinterpreted as path prefixes for TS, e.g., `src/domain/**`). Handles barrel re-exports as transparent.
@@ -142,21 +185,21 @@ Warn if a declared module matches zero files in the scanned commit.
 - **Blueprint DSL:** Pattern syntax extended: `module domain src/domain/**` (path-prefix patterns for non-Java). Backward-compatible — Java patterns contain `.` not `/`.
 - **DoD:** Running against a TypeScript monorepo with known import violations produces correct violation list. Integration test using in-memory git with `.ts` files.
 
-### 4.2 Multi-language blueprint
+### 5.2 Multi-language blueprint
 
 - **Domain:** `Module.packagePatterns()` already supports multiple patterns. Blueprint DSL already supports multiple pattern tokens per module. No domain change needed.
 - **Adapter (cli):** `--language auto` detects dominant file type per commit and selects resolver, or runs both and merges dependency sets.
 - **DoD:** A monorepo with both Java backend and TS frontend analyzed in one run from a single blueprint.
 
-**Phase 4 definition of done:** TypeScript resolver passes its own integration test suite. A mixed-language repo analyzed end-to-end.
+**Phase 5 definition of done:** TypeScript resolver passes its own integration test suite. A mixed-language repo analyzed end-to-end.
 
 ---
 
-## Phase 5 — Deeper structural analysis
+## Phase 6 — Deeper structural analysis
 
 **Value:** Moves from "what's broken" to "what should be reorganized."
 
-### 5.1 Real abstractness metric
+### 6.1 Real abstractness metric
 
 `ModuleMetrics.abstractness` is currently hardcoded to `0.0` in `ModuleMetrics.compute()`. Fix requires the parser to distinguish type declarations.
 
@@ -166,7 +209,7 @@ Warn if a declared module matches zero files in the scanned commit.
 - **Domain:** `ModuleMetrics.compute()` overload accepting `abstractness`. Existing zero-arg call keeps backward compat.
 - **DoD:** `ModuleMetrics.abstractness` and `distanceFromMainSequence` populated correctly. Test: a module of only interfaces gets abstractness=1.0.
 
-### 5.2 Module split and merge suggestions
+### 6.2 Module split and merge suggestions
 
 - **Application:** New use case `SuggestRefactorings`. Rules:
   - Split candidate: `typeCount > 30 && cohesionRatio < 0.4` (large + loosely internally connected). Cohesion proxy: ratio of intra-module dependencies to total possible.
@@ -175,7 +218,7 @@ Warn if a declared module matches zero files in the scanned commit.
 - **Adapter (cli):** Console report adds "--- Refactoring Suggestions ---" section.
 - **DoD:** Applied to `petclinic.blueprint` — produces at least one actionable suggestion.
 
-### 5.3 Community detection (algorithmic vs declared structure)
+### 6.3 Community detection (algorithmic vs declared structure)
 
 Identify clusters in the actual dependency graph that don't align with declared modules — reveals where the real architecture has drifted from the intended one.
 
@@ -183,40 +226,40 @@ Identify clusters in the actual dependency graph that don't align with declared 
 - **Domain:** New `ArchitectureCommunity(Set<Module> modules, String suggestedName)`.
 - **DoD:** Communities printed in report. Test: 3-module graph with two tightly coupled and one isolated produces two communities.
 
-**Phase 5 definition of done:** Distance from main sequence uses real abstractness. Report includes split/merge suggestions and community mismatches.
+**Phase 6 definition of done:** Distance from main sequence uses real abstractness. Report includes split/merge suggestions and community mismatches.
 
 ---
 
-## Phase 6 — Distribution and adoption
+## Phase 7 — Distribution and adoption
 
 **Value:** Lowers installation barrier from "clone and build" to "one curl command."
 
-### 6.1 GraalVM native-image
+### 7.1 GraalVM native-image
 
 - **Build:** Add `native-image` Maven profile. Configure reflection metadata for JGit. Produce platform binaries: `archtelemetry-linux-amd64`, `archtelemetry-darwin-arm64`, `archtelemetry-windows-amd64.exe`.
 - **CI:** GitHub Actions matrix build: 3 platforms, upload to release artifacts.
 - **DoD:** `curl ... | bash` installs and runs the binary with no JVM. `archtelemetry --version` works.
 
-### 6.2 Homebrew tap
+### 7.2 Homebrew tap
 
 - New repo: `archtelemetry/homebrew-tap`. Auto-updated on release via GitHub Action.
 - `brew install archtelemetry/tap/archtelemetry` works.
 - **DoD:** Tap formula tested on macOS arm64.
 
-### 6.3 GitHub Releases with curl installer
+### 7.3 GitHub Releases with curl installer
 
 - `install.sh`: detects OS/arch, downloads correct binary from release, places in `/usr/local/bin`.
 - **DoD:** `curl -sSL https://... | sh` on fresh Ubuntu/macOS produces working binary.
 
-**Phase 6 definition of done:** Three one-line install paths work (Homebrew, curl, direct binary download).
+**Phase 7 definition of done:** Three one-line install paths work (Homebrew, curl, direct binary download).
 
 ---
 
-## Phase 7 — Advanced insights (enterprise tier)
+## Phase 8 — Advanced insights (enterprise tier)
 
 **Value:** Combines structural analysis with test quality and graph algorithms for enterprise-grade risk prioritization.
 
-### 7.1 Coverage integration (CRAP score)
+### 8.1 Coverage integration (CRAP score)
 
 Parse JaCoCo XML (`jacoco.xml`) or lcov (`lcov.info`) reports. Compute per-method CRAP score: `cc² × (1 - coverage)³ + cc`. Roll up to module `testDebtScore = totalCrap × (undercoveredMethods / measuredMethods)`.
 
@@ -225,7 +268,7 @@ Parse JaCoCo XML (`jacoco.xml`) or lcov (`lcov.info`) reports. Compute per-metho
 - **Adapter (cli):** `--coverage <jacoco.xml>` flag.
 - **DoD:** `testDebtScore` printed per module. Integration test with fixture JaCoCo XML.
 
-### 7.2 PageRank and betweenness centrality
+### 8.2 PageRank and betweenness centrality
 
 Identify modules that are transitively critical (PageRank) and architectural chokepoints (betweenness).
 
@@ -233,7 +276,7 @@ Identify modules that are transitively critical (PageRank) and architectural cho
 - **Domain:** `ModuleMetrics` extended with `pageRank`, `betweenness`, `hubScore`.
 - **DoD:** Modules ranked by hubScore in report. Test: star-topology graph — center module gets highest betweenness.
 
-### 7.3 Blueprint inference
+### 8.3 Blueprint inference
 
 Point the tool at a codebase with no blueprint — it infers module structure from package naming conventions and existing import patterns, then asks "is this what you intended?"
 
@@ -241,7 +284,7 @@ Point the tool at a codebase with no blueprint — it infers module structure fr
 - **Adapter (cli):** `archtelemetry infer --repo <path> [--language java]` prints a candidate `.blueprint` file to stdout.
 - **DoD:** Running `infer` on this repo produces a blueprint close to `arch.blueprint`. Output is a valid blueprint file that can be loaded by `BlueprintLoader`.
 
-### 7.4 Natural language query interface
+### 8.4 Natural language query interface
 
 Ask architecture questions in plain English; get specific, actionable findings.
 
@@ -250,7 +293,7 @@ Ask architecture questions in plain English; get specific, actionable findings.
 - **Adapter (cli):** `archtelemetry query --repo X --blueprint Y "which modules are highest risk?"`. Requires `ARCHTELEMETRY_API_KEY` env var.
 - **DoD:** Query produces actionable output with specific module names and next-step recommendations.
 
-**Phase 7 definition of done:** Coverage, PageRank/betweenness, blueprint inference, and NL query each working end-to-end with at least one integration test.
+**Phase 8 definition of done:** Coverage, PageRank/betweenness, blueprint inference, and NL query each working end-to-end with at least one integration test.
 
 ---
 
@@ -269,13 +312,21 @@ Derived from `powers.md` priority list, mapped to phases above:
 | ChurnAcceleration | 1.3 | 1.2 | Needed |
 | BusFactorRisk | 1.3 | 1.2 | Needed |
 | Chronic violation age | 1.5 | — | Needed |
-| Abstractness (real) | 5.1 | — | Needed |
-| Distance from main sequence | 5.1 | 5.1 | Partial (abstractness=0) |
-| Split/merge suggestions | 5.2 | 5.1 | Needed |
-| Community detection | 5.3 | — | Needed |
-| CRAP score | 7.1 | — | Needed |
-| PageRank | 7.2 | — | Needed |
-| Betweenness centrality | 7.2 | — | Needed |
-| HubScore | 7.2 | 7.2 | Needed |
-| Blueprint inference | 7.3 | — | Needed |
-| NL query interface | 7.4 | all | Needed |
+| Incremental analysis | 3.5.1 | — | Needed |
+| AI feedback output | 3.5.2 | — | Needed |
+| Abstractness (real) | 6.1 | — | Needed |
+| Distance from main sequence | 6.1 | 6.1 | Partial (abstractness=0) |
+| Split/merge suggestions | 6.2 | 6.1 | Needed |
+| Community detection | 6.3 | — | Needed |
+| CRAP score | 8.1 | — | Needed |
+| PageRank | 8.2 | — | Needed |
+| Betweenness centrality | 8.2 | — | Needed |
+| HubScore | 8.2 | 8.2 | Needed |
+| Blueprint inference | 8.3 | — | Needed |
+| NL query interface | 8.4 | all | Needed |
+
+---
+
+## Strategic positioning
+
+The core insight: as AI writes more code, architectural governance becomes more valuable, not less. Human architects can't review every AI-generated import. The blueprint encodes their judgment once; ArchTelemetry enforces it continuously. The tool doesn't restrict what AI can build — it restricts where things are allowed to know about each other. Maximum creative freedom within structural invariants.

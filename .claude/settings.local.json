@@ -15,7 +15,16 @@
       "Bash(xargs -I{} sh -c 'echo \"=== {} ===\"; head -5 {}')",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" -Recurse -File)",
       "Bash(Select-Object FullName)",
-      "Bash(Sort-Object FullName)"
+      "Bash(Sort-Object FullName)",
+      "Bash(mvn compile *)",
+      "Bash(java -jar target/archtelemetry-*.jar --repo . --blueprint petclinic.blueprint --commits 5 --format json)",
+      "Bash(python -m json.tool --no-ensure-ascii)",
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --repo . --blueprint petclinic.blueprint --commits 5 --format markdown)",
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --repo . --blueprint petclinic.blueprint --commits 5 --format html --out /tmp/report.html)",
+      "Read(//tmp/**)",
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --repo . --blueprint petclinic.blueprint --commits 5 --format html --out report_test.html)",
+      "Bash(rm report_test.html)",
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --repo . --blueprint petclinic.blueprint --commits 5 --format html)"
     ]
   }
 }
