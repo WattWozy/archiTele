@@ -3,6 +3,7 @@ package dev.archtelemetry.adapter.cli;
 import dev.archtelemetry.application.HealthReport;
 import dev.archtelemetry.domain.ModuleMetrics;
 import dev.archtelemetry.domain.Snapshot;
+import dev.archtelemetry.domain.StaleModuleWarning;
 import dev.archtelemetry.domain.Trend;
 import dev.archtelemetry.domain.ViolationRecord;
 
@@ -14,6 +15,11 @@ import java.util.stream.Collectors;
 public final class MarkdownReportWriter {
 
     public static String generate(Trend trend, HealthReport report, List<Snapshot> snapshots) {
+        return generate(trend, report, snapshots, List.of());
+    }
+
+    public static String generate(Trend trend, HealthReport report, List<Snapshot> snapshots,
+                                  List<StaleModuleWarning> staleWarnings) {
         StringBuilder sb = new StringBuilder();
 
         sb.append("# ArchTelemetry Health Report\n\n");
@@ -134,6 +140,15 @@ public final class MarkdownReportWriter {
                     .sorted(Comparator.comparing(w -> w.module().name()))
                     .forEach(w -> sb.append("- :warning: **").append(w.module().name())
                             .append("**: ").append(w.reason()).append("\n"));
+            sb.append("\n");
+        }
+
+        if (!staleWarnings.isEmpty()) {
+            sb.append("## Blueprint Warnings — Stale Modules\n\n");
+            staleWarnings.stream()
+                    .sorted(Comparator.comparing(w -> w.module().name()))
+                    .forEach(w -> sb.append("- :warning: **").append(w.module().name())
+                            .append("** — no files matched this module in the latest snapshot\n"));
             sb.append("\n");
         }
 

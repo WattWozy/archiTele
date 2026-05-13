@@ -6,6 +6,7 @@ import dev.archtelemetry.adapter.git.SnapshotConfig;
 import dev.archtelemetry.adapter.java.JavaDependencyResolver;
 import dev.archtelemetry.application.AnalyzeHistory;
 import dev.archtelemetry.application.AnalyzeSnapshot;
+import dev.archtelemetry.application.BlueprintValidator;
 import dev.archtelemetry.application.ComputeGitStats;
 import dev.archtelemetry.application.ComputeMetrics;
 import dev.archtelemetry.application.HealthReport;
@@ -19,11 +20,13 @@ import dev.archtelemetry.domain.CommitEntry;
 import dev.archtelemetry.domain.Module;
 import dev.archtelemetry.domain.ModuleGitStats;
 import dev.archtelemetry.domain.Snapshot;
+import dev.archtelemetry.domain.StaleModuleWarning;
 import dev.archtelemetry.domain.Trend;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -35,6 +38,7 @@ public final class Main {
         Path outPath = null;
         int commitCount = 20;
         String format = "console";
+        List<String> failOnConditions = new ArrayList<>();
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
@@ -43,6 +47,7 @@ public final class Main {
                 case "--commits" -> commitCount = Integer.parseInt(args[++i]);
                 case "--format" -> format = args[++i];
                 case "--out" -> outPath = Path.of(args[++i]);
+                case "--fail-on" -> failOnConditions.add(args[++i]);
                 default -> {
                     System.err.println("Unknown argument: " + args[i]);
                     printUsage();
@@ -67,6 +72,7 @@ public final class Main {
         ComputeMetrics computeMetrics = new ComputeMetrics(analyzeSnapshot);
         ComputeGitStats computeGitStats = new ComputeGitStats();
         ReportHealth reportHealth = new ReportHealth();
+        BlueprintValidator blueprintValidator = new BlueprintValidator();
 
         List<Snapshot> snapshots = snapshotSource.fetchSnapshots();
         List<CommitEntry> history = historySource.fetchHistory();
@@ -78,16 +84,62 @@ public final class Main {
                 .toList();
         HealthReport report = reportHealth.report(trend, profiles);
 
+        List<StaleModuleWarning> staleWarnings = snapshots.isEmpty()
+                ? List.of()
+                : blueprintValidator.validate(blueprint, snapshots.get(snapshots.size() - 1));
+
         switch (format) {
-            case "console" -> HealthReportPrinter.print(trend, report, snapshots);
-            case "json" -> writeOutput(JsonReportWriter.generate(trend, report, snapshots), outPath);
-            case "markdown" -> writeOutput(MarkdownReportWriter.generate(trend, report, snapshots), outPath);
-            case "html" -> writeOutput(HtmlReportWriter.generate(trend, report, snapshots), outPath);
+            case "console" -> HealthReportPrinter.print(trend, report, snapshots, staleWarnings);
+            case "json" -> writeOutput(JsonReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
+            case "markdown" -> writeOutput(MarkdownReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
+            case "html" -> writeOutput(HtmlReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
             default -> {
                 System.err.println("Unknown format: " + format + ". Valid values: console, json, markdown, html");
                 System.exit(1);
             }
         }
+
+        int exitCode = evaluateFailOn(failOnConditions, report, staleWarnings);
+        if (exitCode != 0) {
+            System.exit(exitCode);
+        }
+    }
+
+    private static int evaluateFailOn(List<String> conditions, HealthReport report,
+                                      List<StaleModuleWarning> staleWarnings) {
+        int exitCode = 0;
+        for (String condition : conditions) {
+            boolean triggered = switch (condition) {
+                case "new-violations" -> !report.newViolations().isEmpty();
+                case "any-violations" -> report.totalViolations() > 0;
+                case "new-cycles" -> report.latestProfile() != null
+                        && !report.latestProfile().cycles().isEmpty();
+                case "stale-blueprint" -> !staleWarnings.isEmpty();
+                default -> {
+                    if (condition.startsWith("instability-threshold=")) {
+                        try {
+                            double threshold = Double.parseDouble(
+                                    condition.substring("instability-threshold=".length()));
+                            yield report.latestProfile() != null
+                                    && report.latestProfile().moduleMetrics().stream()
+                                       .anyMatch(m -> m.instability() > threshold);
+                        } catch (NumberFormatException e) {
+                            System.err.println("Invalid instability threshold in: " + condition);
+                            yield false;
+                        }
+                    }
+                    System.err.println("Unknown --fail-on condition: " + condition
+                            + ". Valid: new-violations, any-violations, new-cycles, "
+                            + "instability-threshold=<N>, stale-blueprint");
+                    yield false;
+                }
+            };
+            if (triggered) {
+                System.err.println("FAIL: --fail-on " + condition + " condition triggered");
+                exitCode = 1;
+            }
+        }
+        return exitCode;
     }
 
     private static void writeOutput(String content, Path outPath) {
@@ -105,7 +157,9 @@ public final class Main {
     }
 
     private static void printUsage() {
-        System.err.println("Usage: archtelemetry --repo <path> --blueprint <path> [--commits <n>] [--format console|json|markdown|html] [--out <file>]");
+        System.err.println("Usage: archtelemetry --repo <path> --blueprint <path> [--commits <n>] "
+                + "[--format console|json|markdown|html] [--out <file>] "
+                + "[--fail-on new-violations|any-violations|new-cycles|instability-threshold=<N>|stale-blueprint]");
         System.exit(1);
     }
 }

@@ -4,6 +4,7 @@ import dev.archtelemetry.application.HealthReport;
 import dev.archtelemetry.domain.DependencyCycle;
 import dev.archtelemetry.domain.ModuleMetrics;
 import dev.archtelemetry.domain.Snapshot;
+import dev.archtelemetry.domain.StaleModuleWarning;
 import dev.archtelemetry.domain.Trend;
 import dev.archtelemetry.domain.ViolationRecord;
 
@@ -15,6 +16,11 @@ import java.util.stream.Collectors;
 public final class JsonReportWriter {
 
     public static String generate(Trend trend, HealthReport report, List<Snapshot> snapshots) {
+        return generate(trend, report, snapshots, List.of());
+    }
+
+    public static String generate(Trend trend, HealthReport report, List<Snapshot> snapshots,
+                                  List<StaleModuleWarning> staleWarnings) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\n");
 
@@ -150,6 +156,15 @@ public final class JsonReportWriter {
                 .toList();
         sb.append(String.join(",\n", warnings));
         if (!warnings.isEmpty()) sb.append("\n");
+        sb.append("  ],\n");
+
+        sb.append("  \"staleModules\": [\n");
+        List<String> staleLines = staleWarnings.stream()
+                .sorted(Comparator.comparing(w -> w.module().name()))
+                .map(w -> "    " + str(w.module().name()))
+                .toList();
+        sb.append(String.join(",\n", staleLines));
+        if (!staleLines.isEmpty()) sb.append("\n");
         sb.append("  ]\n");
 
         sb.append("}\n");

@@ -5,6 +5,7 @@ import dev.archtelemetry.application.InstabilityWarning;
 import dev.archtelemetry.domain.DriftDirection;
 import dev.archtelemetry.domain.ModuleMetrics;
 import dev.archtelemetry.domain.Snapshot;
+import dev.archtelemetry.domain.StaleModuleWarning;
 import dev.archtelemetry.domain.Trend;
 import dev.archtelemetry.domain.Violation;
 import dev.archtelemetry.domain.ViolationRecord;
@@ -17,6 +18,19 @@ import java.util.stream.Collectors;
 public final class HealthReportPrinter {
 
     public static void print(Trend trend, HealthReport report, List<Snapshot> snapshots) {
+        print(trend, report, snapshots, List.of());
+    }
+
+    public static void print(Trend trend, HealthReport report, List<Snapshot> snapshots,
+                             List<StaleModuleWarning> staleWarnings) {
+        if (!staleWarnings.isEmpty()) {
+            System.out.println("--- Blueprint Warnings: Stale Modules ---");
+            staleWarnings.stream()
+                    .sorted(Comparator.comparing(w -> w.module().name()))
+                    .forEach(w -> System.out.println("  ⚠ " + w.module().name()
+                            + ": no files matched this module in the latest snapshot"));
+            System.out.println();
+        }
         System.out.println("ArchTelemetry Health Report");
         System.out.println("===========================");
         System.out.println();

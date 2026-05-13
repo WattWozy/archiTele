@@ -2,6 +2,7 @@ package dev.archtelemetry.adapter.cli;
 
 import dev.archtelemetry.application.HealthReport;
 import dev.archtelemetry.domain.Snapshot;
+import dev.archtelemetry.domain.StaleModuleWarning;
 import dev.archtelemetry.domain.Trend;
 
 import java.util.List;
@@ -9,7 +10,12 @@ import java.util.List;
 public final class HtmlReportWriter {
 
     public static String generate(Trend trend, HealthReport report, List<Snapshot> snapshots) {
-        String dataJson = JsonReportWriter.generate(trend, report, snapshots).stripTrailing();
+        return generate(trend, report, snapshots, List.of());
+    }
+
+    public static String generate(Trend trend, HealthReport report, List<Snapshot> snapshots,
+                                  List<StaleModuleWarning> staleWarnings) {
+        String dataJson = JsonReportWriter.generate(trend, report, snapshots, staleWarnings).stripTrailing();
         return HTML_HEAD + dataJson + HTML_TAIL;
     }
 
@@ -129,6 +135,11 @@ canvas{display:block;border-radius:8px;border:1px solid #e2e8f0}
   <h2>Instability Warnings</h2>
   <div id="warnings-content"></div>
 </section>
+
+<section id="section-stale" style="display:none">
+  <h2>Blueprint Warnings — Stale Modules</h2>
+  <div id="stale-content"></div>
+</section>
 </div>
 
 <script>
@@ -147,6 +158,7 @@ function init() {
   renderGraph();
   renderViolations();
   renderWarnings();
+  renderStaleModules();
 }
 
 function renderSummary() {
@@ -398,6 +410,16 @@ function renderWarnings() {
   }
   el.innerHTML = DATA.instabilityWarnings.map(function(w) {
     return '<div class="warn-row"><strong>⚠ ' + esc(w.module) + '</strong><span>' + esc(w.reason) + '</span></div>';
+  }).join('');
+}
+
+function renderStaleModules() {
+  const stale = DATA.staleModules || [];
+  const section = document.getElementById('section-stale');
+  if (!stale.length) return;
+  section.style.display = '';
+  document.getElementById('stale-content').innerHTML = stale.map(function(name) {
+    return '<div class="warn-row"><strong>⚠ ' + esc(name) + '</strong><span>no files matched this module in the latest snapshot — pattern may be stale or mismatched</span></div>';
   }).join('');
 }
 
