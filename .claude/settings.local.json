@@ -26,7 +26,11 @@
       "Bash(rm report_test.html)",
       "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --repo . --blueprint petclinic.blueprint --commits 5 --format html)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" -Recurse -Force)",
-      "Bash(Select-Object FullName, PSIsContainer)"
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(java -jar target/archtelemetry-*.jar --repo . --blueprint arch.blueprint --commits 10)",
+      "Bash(grep '\\\\.java$')",
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --blueprint arch.blueprint --repo . --incremental)",
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --blueprint arch.blueprint --repo . --incremental --format ai-feedback)"
     ]
   }
 }

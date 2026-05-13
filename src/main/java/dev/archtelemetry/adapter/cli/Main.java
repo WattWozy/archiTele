@@ -4,16 +4,17 @@ import dev.archtelemetry.adapter.git.GitHistorySource;
 import dev.archtelemetry.adapter.git.GitSnapshotSource;
 import dev.archtelemetry.adapter.git.SnapshotConfig;
 import dev.archtelemetry.adapter.java.JavaDependencyResolver;
+import dev.archtelemetry.adapter.java.ResolvedDataWithLocations;
 import dev.archtelemetry.application.AnalyzeHistory;
+import dev.archtelemetry.application.AnalyzeIncremental;
 import dev.archtelemetry.application.AnalyzeSnapshot;
 import dev.archtelemetry.application.BlueprintValidator;
 import dev.archtelemetry.application.ComputeGitStats;
 import dev.archtelemetry.application.ComputeMetrics;
 import dev.archtelemetry.application.HealthReport;
+import dev.archtelemetry.application.IncrementalResult;
 import dev.archtelemetry.application.ReportHealth;
-import dev.archtelemetry.application.port.DependencyResolver;
-import dev.archtelemetry.application.port.HistorySource;
-import dev.archtelemetry.application.port.SnapshotSource;
+import dev.archtelemetry.application.port.ResolvedData;
 import dev.archtelemetry.domain.ArchitectureProfile;
 import dev.archtelemetry.domain.Blueprint;
 import dev.archtelemetry.domain.CommitEntry;
@@ -26,9 +27,12 @@ import dev.archtelemetry.domain.Trend;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Scanner;
+import java.util.Set;
 
 public final class Main {
 
@@ -36,18 +40,30 @@ public final class Main {
         Path repoPath = null;
         Path blueprintPath = null;
         Path outPath = null;
+        Path srcDir = null;
         int commitCount = 20;
         String format = "console";
         List<String> failOnConditions = new ArrayList<>();
+        boolean incrementalMode = false;
+        boolean watchMode = false;
+        List<Path> changedFiles = new ArrayList<>();
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
-                case "--repo" -> repoPath = Path.of(args[++i]);
-                case "--blueprint" -> blueprintPath = Path.of(args[++i]);
-                case "--commits" -> commitCount = Integer.parseInt(args[++i]);
-                case "--format" -> format = args[++i];
-                case "--out" -> outPath = Path.of(args[++i]);
-                case "--fail-on" -> failOnConditions.add(args[++i]);
+                case "--repo"        -> repoPath = Path.of(args[++i]);
+                case "--blueprint"   -> blueprintPath = Path.of(args[++i]);
+                case "--commits"     -> commitCount = Integer.parseInt(args[++i]);
+                case "--format"      -> format = args[++i];
+                case "--out"         -> outPath = Path.of(args[++i]);
+                case "--fail-on"     -> failOnConditions.add(args[++i]);
+                case "--src"         -> srcDir = Path.of(args[++i]);
+                case "--incremental" -> incrementalMode = true;
+                case "--watch"       -> watchMode = true;
+                case "--changed"     -> {
+                    while (i + 1 < args.length && !args[i + 1].startsWith("--")) {
+                        changedFiles.add(Path.of(args[++i]));
+                    }
+                }
                 default -> {
                     System.err.println("Unknown argument: " + args[i]);
                     printUsage();
@@ -55,16 +71,43 @@ public final class Main {
             }
         }
 
-        if (repoPath == null || blueprintPath == null) {
+        if (blueprintPath == null) {
             printUsage();
             return;
         }
 
         Blueprint blueprint = BlueprintLoader.load(blueprintPath);
-        DependencyResolver resolver = new JavaDependencyResolver(blueprint.modules());
-        SnapshotSource snapshotSource = new GitSnapshotSource(
+        JavaDependencyResolver resolver = new JavaDependencyResolver(blueprint.modules());
+
+        if (watchMode) {
+            runWatch(blueprint, resolver, repoPath, srcDir, format);
+            return;
+        }
+
+        if (incrementalMode) {
+            runIncremental(blueprint, resolver, repoPath, srcDir, changedFiles, format);
+            return;
+        }
+
+        // Normal mode — requires --repo
+        if (repoPath == null) {
+            printUsage();
+            return;
+        }
+
+        runNormal(blueprint, resolver, repoPath, commitCount, format, outPath, failOnConditions);
+    }
+
+    // -------------------------------------------------------------------------
+    // Normal (git history) mode
+    // -------------------------------------------------------------------------
+
+    private static void runNormal(Blueprint blueprint, JavaDependencyResolver resolver,
+                                  Path repoPath, int commitCount, String format,
+                                  Path outPath, List<String> failOnConditions) {
+        GitSnapshotSource snapshotSource = new GitSnapshotSource(
                 repoPath, resolver, new SnapshotConfig.LastN(commitCount));
-        HistorySource historySource = new GitHistorySource(
+        GitHistorySource historySource = new GitHistorySource(
                 repoPath, new SnapshotConfig.LastN(commitCount));
 
         AnalyzeSnapshot analyzeSnapshot = new AnalyzeSnapshot();
@@ -89,19 +132,150 @@ public final class Main {
                 : blueprintValidator.validate(blueprint, snapshots.get(snapshots.size() - 1));
 
         switch (format) {
-            case "console" -> HealthReportPrinter.print(trend, report, snapshots, staleWarnings);
-            case "json" -> writeOutput(JsonReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
-            case "markdown" -> writeOutput(MarkdownReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
-            case "html" -> writeOutput(HtmlReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
+            case "console"     -> HealthReportPrinter.print(trend, report, snapshots, staleWarnings);
+            case "json"        -> writeOutput(JsonReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
+            case "markdown"    -> writeOutput(MarkdownReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
+            case "html"        -> writeOutput(HtmlReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
+            case "ai-feedback" -> {
+                Set<dev.archtelemetry.domain.Violation> violations = report.latestProfile() != null
+                        ? report.latestProfile().violations()
+                        : Set.of();
+                writeOutput(AiFeedbackWriter.generate(violations, blueprint), outPath);
+            }
             default -> {
-                System.err.println("Unknown format: " + format + ". Valid values: console, json, markdown, html");
+                System.err.println("Unknown format: " + format
+                        + ". Valid: console, json, markdown, html, ai-feedback");
                 System.exit(1);
             }
         }
 
         int exitCode = evaluateFailOn(failOnConditions, report, staleWarnings);
-        if (exitCode != 0) {
-            System.exit(exitCode);
+        if (exitCode != 0) System.exit(exitCode);
+    }
+
+    // -------------------------------------------------------------------------
+    // Incremental mode — fast check of changed files against HEAD or working tree
+    // -------------------------------------------------------------------------
+
+    private static void runIncremental(Blueprint blueprint, JavaDependencyResolver resolver,
+                                       Path repoPath, Path srcDir,
+                                       List<Path> changedFiles, String format) {
+        // Derive source dir for working-tree baseline when no --repo
+        Path effectiveSrcDir = resolveSrcDir(repoPath, srcDir);
+
+        // Baseline snapshot
+        Snapshot baseline;
+        if (repoPath != null) {
+            // Single git HEAD commit — fast
+            GitSnapshotSource snapshotSource = new GitSnapshotSource(
+                    repoPath, resolver, new SnapshotConfig.LastN(1));
+            List<Snapshot> snapshots = snapshotSource.fetchSnapshots();
+            baseline = snapshots.isEmpty() ? emptySnapshot() : snapshots.get(0);
+        } else {
+            // Full working-tree scan (no git)
+            if (effectiveSrcDir == null || !Files.isDirectory(effectiveSrcDir)) {
+                System.err.println("--incremental without --repo requires --src <source-dir>");
+                System.exit(1);
+                return;
+            }
+            Set<Path> allFiles = WorkingTreeScanner.scanJavaFiles(effectiveSrcDir);
+            ResolvedData data = resolver.resolve(allFiles);
+            baseline = new Snapshot("baseline", Instant.now(), data.dependencies(), data.moduleWmc());
+        }
+
+        // Changed files — from args or stdin
+        if (changedFiles.isEmpty()) {
+            readChangedFilesFromStdin(changedFiles);
+        }
+        if (changedFiles.isEmpty()) {
+            System.err.println("No changed files. Use --changed <file>... or pipe paths to stdin.");
+            System.exit(1);
+            return;
+        }
+
+        List<Path> existing = changedFiles.stream().filter(Files::exists).toList();
+        if (existing.isEmpty()) {
+            System.err.println("All changed files are deleted. No incremental analysis possible.");
+            System.exit(0);
+            return;
+        }
+
+        AnalyzeSnapshot analyzeSnapshot = new AnalyzeSnapshot();
+        AnalyzeIncremental analyzeIncremental = new AnalyzeIncremental(resolver, analyzeSnapshot);
+
+        ResolvedDataWithLocations located = resolver.resolveWithLocations(Set.copyOf(existing));
+        IncrementalResult result = analyzeIncremental.analyze(Set.copyOf(existing), blueprint, baseline);
+
+        switch (format) {
+            case "ai-feedback" -> {
+                System.out.print(AiFeedbackWriter.generate(
+                        result.newViolations(), located.locatedDependencies(), blueprint));
+            }
+            default -> {
+                System.out.println("Changed files : " + existing.size());
+                System.out.println("New violations: " + result.newViolations().size());
+                System.out.println("All violations: " + result.allViolations().size());
+                if (!result.newViolations().isEmpty()) {
+                    System.out.println();
+                    result.newViolations().forEach(v ->
+                            System.out.println("  [VIOLATION] "
+                                    + v.dependency().source().name() + " -> "
+                                    + v.dependency().target().name()));
+                }
+            }
+        }
+
+        if (!result.newViolations().isEmpty()) System.exit(1);
+    }
+
+    // -------------------------------------------------------------------------
+    // Watch mode — continuous incremental analysis via NIO WatchService
+    // -------------------------------------------------------------------------
+
+    private static void runWatch(Blueprint blueprint, JavaDependencyResolver resolver,
+                                 Path repoPath, Path srcDir, String format) {
+        Path effectiveSrcDir = resolveSrcDir(repoPath, srcDir);
+        if (effectiveSrcDir == null || !Files.isDirectory(effectiveSrcDir)) {
+            System.err.println("--watch requires --src <source-dir> (or --repo with a src/main/java subdirectory)");
+            System.exit(1);
+            return;
+        }
+
+        boolean aiFeedback = "ai-feedback".equals(format);
+        WatchMode watchMode = new WatchMode(effectiveSrcDir, blueprint, resolver, aiFeedback);
+        try {
+            watchMode.run();
+        } catch (IOException e) {
+            System.err.println("Watch error: " + e.getMessage());
+            System.exit(1);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    private static Path resolveSrcDir(Path repoPath, Path srcDir) {
+        if (srcDir != null) return srcDir;
+        if (repoPath != null) {
+            Path candidate = repoPath.resolve("src/main/java");
+            return Files.isDirectory(candidate) ? candidate : repoPath;
+        }
+        return null;
+    }
+
+    private static Snapshot emptySnapshot() {
+        return new Snapshot("empty", Instant.now(), Set.of(), Map.of());
+    }
+
+    private static void readChangedFilesFromStdin(List<Path> changedFiles) {
+        try (Scanner scanner = new Scanner(System.in)) {
+            while (scanner.hasNextLine()) {
+                String line = scanner.nextLine().trim();
+                if (!line.isEmpty()) changedFiles.add(Path.of(line));
+            }
         }
     }
 
@@ -110,9 +284,9 @@ public final class Main {
         int exitCode = 0;
         for (String condition : conditions) {
             boolean triggered = switch (condition) {
-                case "new-violations" -> !report.newViolations().isEmpty();
-                case "any-violations" -> report.totalViolations() > 0;
-                case "new-cycles" -> report.latestProfile() != null
+                case "new-violations"  -> !report.newViolations().isEmpty();
+                case "any-violations"  -> report.totalViolations() > 0;
+                case "new-cycles"      -> report.latestProfile() != null
                         && !report.latestProfile().cycles().isEmpty();
                 case "stale-blueprint" -> !staleWarnings.isEmpty();
                 default -> {
@@ -124,7 +298,7 @@ public final class Main {
                                     && report.latestProfile().moduleMetrics().stream()
                                        .anyMatch(m -> m.instability() > threshold);
                         } catch (NumberFormatException e) {
-                            System.err.println("Invalid instability threshold in: " + condition);
+                            System.err.println("Invalid threshold in: " + condition);
                             yield false;
                         }
                     }
@@ -135,7 +309,7 @@ public final class Main {
                 }
             };
             if (triggered) {
-                System.err.println("FAIL: --fail-on " + condition + " condition triggered");
+                System.err.println("FAIL: --fail-on " + condition + " triggered");
                 exitCode = 1;
             }
         }
@@ -157,9 +331,21 @@ public final class Main {
     }
 
     private static void printUsage() {
-        System.err.println("Usage: archtelemetry --repo <path> --blueprint <path> [--commits <n>] "
-                + "[--format console|json|markdown|html] [--out <file>] "
-                + "[--fail-on new-violations|any-violations|new-cycles|instability-threshold=<N>|stale-blueprint]");
+        System.err.println("""
+                Usage:
+                  archtelemetry --repo <path> --blueprint <path> [options]
+                  archtelemetry --blueprint <path> --incremental [--repo <path>] [--src <dir>] [--changed <files>...] [--format console|ai-feedback]
+                  archtelemetry --blueprint <path> --watch [--repo <path>] [--src <dir>] [--format console|ai-feedback]
+
+                Options:
+                  --commits <n>         Commits to analyze (default: 20)
+                  --format <fmt>        console | json | markdown | html | ai-feedback
+                  --out <file>          Write output to file (default: stdout)
+                  --fail-on <cond>      Exit 1 on: new-violations, any-violations, new-cycles,
+                                        instability-threshold=<N>, stale-blueprint
+                  --src <dir>           Source directory for watch/incremental (default: <repo>/src/main/java)
+                  --changed <files>...  Changed files for --incremental (or pipe to stdin)
+                """);
         System.exit(1);
     }
 }

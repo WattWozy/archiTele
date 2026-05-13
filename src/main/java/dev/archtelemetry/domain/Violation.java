@@ -1,3 +1,4 @@
 package dev.archtelemetry.domain;
 
-public record Violation(Dependency dependency) {}
+public record Violation(Dependency dependency) {
+}

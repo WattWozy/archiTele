@@ -9,8 +9,10 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -58,6 +60,54 @@ public final class JavaDependencyResolver implements DependencyResolver {
                     .forEach(dependencies::add);
         }
         return new ResolvedData(Set.copyOf(dependencies), Map.copyOf(moduleWmc));
+    }
+
+    /**
+     * Like resolve(), but also captures source file and line number for each dependency.
+     * Used by --format ai-feedback and watch mode.
+     */
+    public ResolvedDataWithLocations resolveWithLocations(Set<Path> sourceFiles) {
+        Set<Dependency> dependencies = new HashSet<>();
+        Map<Module, Integer> moduleWmc = new HashMap<>();
+        List<LocatedDependency> located = new ArrayList<>();
+
+        for (Path file : sourceFiles) {
+            String source = readFile(file);
+            Optional<Module> sourceModule = extractPackage(source).flatMap(this::resolveModuleByPackage);
+            if (sourceModule.isEmpty()) continue;
+
+            int methodCount = countMethods(source);
+            moduleWmc.merge(sourceModule.get(), methodCount, Integer::sum);
+
+            for (Map.Entry<String, Integer> entry : extractImportsWithLines(source)) {
+                String imp = entry.getKey();
+                int lineNum = entry.getValue();
+                if (imp.startsWith("java.") || imp.startsWith("javax.")) continue;
+                resolveModuleByImport(imp).ifPresent(target -> {
+                    if (!target.equals(sourceModule.get())) {
+                        Dependency dep = new Dependency(sourceModule.get(), target);
+                        dependencies.add(dep);
+                        located.add(new LocatedDependency(dep, file, lineNum, imp));
+                    }
+                });
+            }
+        }
+
+        var data = new dev.archtelemetry.application.port.ResolvedData(
+                Set.copyOf(dependencies), Map.copyOf(moduleWmc));
+        return new ResolvedDataWithLocations(data, List.copyOf(located));
+    }
+
+    private List<Map.Entry<String, Integer>> extractImportsWithLines(String source) {
+        List<Map.Entry<String, Integer>> result = new ArrayList<>();
+        String[] lines = source.split("\n", -1);
+        for (int i = 0; i < lines.length; i++) {
+            Matcher m = IMPORT_DECL.matcher(lines[i]);
+            if (m.find()) {
+                result.add(Map.entry(m.group(1), i + 1));
+            }
+        }
+        return result;
     }
 
     private int countMethods(String source) {
