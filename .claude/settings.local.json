@@ -30,7 +30,9 @@
       "Bash(java -jar target/archtelemetry-*.jar --repo . --blueprint arch.blueprint --commits 10)",
       "Bash(grep '\\\\.java$')",
       "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --blueprint arch.blueprint --repo . --incremental)",
-      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --blueprint arch.blueprint --repo . --incremental --format ai-feedback)"
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --blueprint arch.blueprint --repo . --incremental --format ai-feedback)",
+      "Bash(xargs -I {} basename {})",
+      "Bash(git add *)"
     ]
   }
 }
