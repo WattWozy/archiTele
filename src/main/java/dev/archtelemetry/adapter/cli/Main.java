@@ -1,13 +1,14 @@
 package dev.archtelemetry.adapter.cli;
 
+import dev.archtelemetry.adapter.coverage.JacocoXmlCoverageSource;
+import dev.archtelemetry.adapter.coverage.LcovCoverageSource;
 import dev.archtelemetry.adapter.git.GitHistorySource;
 import dev.archtelemetry.adapter.git.GitSnapshotSource;
 import dev.archtelemetry.adapter.git.Language;
 import dev.archtelemetry.adapter.git.SnapshotConfig;
 import dev.archtelemetry.adapter.java.JavaDependencyResolver;
+import dev.archtelemetry.adapter.llm.AnthropicLlmClient;
 import dev.archtelemetry.adapter.typescript.TypeScriptDependencyResolver;
-import dev.archtelemetry.application.port.LocatingDependencyResolver;
-import dev.archtelemetry.application.port.ResolvedDataWithLocations;
 import dev.archtelemetry.application.AnalyzeHistory;
 import dev.archtelemetry.application.AnalyzeIncremental;
 import dev.archtelemetry.application.AnalyzeSnapshot;
@@ -16,8 +17,13 @@ import dev.archtelemetry.application.ComputeGitStats;
 import dev.archtelemetry.application.ComputeMetrics;
 import dev.archtelemetry.application.HealthReport;
 import dev.archtelemetry.application.IncrementalResult;
+import dev.archtelemetry.application.InferBlueprint;
+import dev.archtelemetry.application.QueryArchitecture;
 import dev.archtelemetry.application.ReportHealth;
+import dev.archtelemetry.application.port.CoverageSource;
+import dev.archtelemetry.application.port.LocatingDependencyResolver;
 import dev.archtelemetry.application.port.ResolvedData;
+import dev.archtelemetry.application.port.ResolvedDataWithLocations;
 import dev.archtelemetry.domain.ArchitectureProfile;
 import dev.archtelemetry.domain.Blueprint;
 import dev.archtelemetry.domain.CommitEntry;
@@ -28,22 +34,38 @@ import dev.archtelemetry.domain.StaleModuleWarning;
 import dev.archtelemetry.domain.Trend;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class Main {
 
     public static void main(String[] args) {
+        // Subcommand dispatch
+        if (args.length > 0 && args[0].equals("infer")) {
+            runInferCommand(args);
+            return;
+        }
+        if (args.length > 0 && args[0].equals("query")) {
+            runQueryCommand(args);
+            return;
+        }
+
         Path repoPath = null;
         Path blueprintPath = null;
         Path outPath = null;
         Path srcDir = null;
+        Path coveragePath = null;
         int commitCount = 20;
         String format = "console";
         String language = "java";
@@ -69,6 +91,7 @@ public final class Main {
                 case "--language"    -> language = args[++i];
                 case "--incremental" -> incrementalMode = true;
                 case "--watch"       -> watchMode = true;
+                case "--coverage"    -> coveragePath = Path.of(args[++i]);
                 case "--changed"     -> {
                     while (i + 1 < args.length && !args[i + 1].startsWith("--")) {
                         changedFiles.add(Path.of(args[++i]));
@@ -95,8 +118,6 @@ public final class Main {
             default           -> Language.JAVA;
         };
 
-        // Blueprint patterns are always relative to the project root (repo root or CWD).
-        // --src controls what to scan, not the path prefix used in patterns.
         Path projectRoot = repoPath != null ? repoPath : Path.of(".").toAbsolutePath().normalize();
         Path effectiveSrcDir = resolveSrcDir(repoPath, srcDir);
         LocatingDependencyResolver resolver = switch (lang) {
@@ -115,13 +136,14 @@ public final class Main {
             return;
         }
 
-        // Normal mode — requires --repo
         if (repoPath == null) {
             printUsage();
             return;
         }
 
-        runNormal(blueprint, javaResolver, lang, blueprint.modules(), repoPath, commitCount, format, outPath, failOnConditions);
+        CoverageSource coverageSource = buildCoverageSource(coveragePath);
+        runNormal(blueprint, javaResolver, lang, blueprint.modules(), repoPath, commitCount,
+                format, outPath, failOnConditions, coverageSource);
     }
 
     // -------------------------------------------------------------------------
@@ -131,7 +153,8 @@ public final class Main {
     private static void runNormal(Blueprint blueprint, JavaDependencyResolver javaResolver,
                                   Language lang, Set<Module> modules,
                                   Path repoPath, int commitCount, String format,
-                                  Path outPath, List<String> failOnConditions) {
+                                  Path outPath, List<String> failOnConditions,
+                                  CoverageSource coverageSource) {
         GitSnapshotSource snapshotSource = new GitSnapshotSource(
                 repoPath, javaResolver,
                 root -> new TypeScriptDependencyResolver(modules, root),
@@ -152,7 +175,7 @@ public final class Main {
 
         Trend trend = analyzeHistory.analyze(blueprint, snapshots);
         List<ArchitectureProfile> profiles = snapshots.stream()
-                .map(s -> computeMetrics.compute(blueprint, s, gitStats))
+                .map(s -> computeMetrics.compute(blueprint, s, gitStats, coverageSource))
                 .toList();
         HealthReport report = reportHealth.report(trend, profiles);
 
@@ -183,25 +206,162 @@ public final class Main {
     }
 
     // -------------------------------------------------------------------------
-    // Incremental mode — fast check of changed files against HEAD or working tree
+    // Infer subcommand
+    // -------------------------------------------------------------------------
+
+    private static void runInferCommand(String[] args) {
+        Path repoPath = null;
+        int depth = 2;
+
+        for (int i = 1; i < args.length; i++) {
+            switch (args[i]) {
+                case "--repo"     -> repoPath = Path.of(args[++i]);
+                case "--depth"    -> depth = Integer.parseInt(args[++i]);
+                case "--language" -> { i++; /* java only for now */ }
+                default -> {
+                    System.err.println("Unknown infer argument: " + args[i]);
+                    System.err.println("Usage: archtelemetry infer --repo <path> [--depth 2]");
+                    System.exit(1);
+                }
+            }
+        }
+
+        if (repoPath == null) {
+            System.err.println("Usage: archtelemetry infer --repo <path> [--depth 2]");
+            System.exit(1);
+            return;
+        }
+
+        Set<Path> javaFiles = WorkingTreeScanner.scanJavaFiles(repoPath);
+        if (javaFiles.isEmpty()) {
+            System.err.println("No .java files found under: " + repoPath);
+            System.exit(1);
+            return;
+        }
+
+        Set<String> allPackages = new HashSet<>();
+        List<Map.Entry<String, String>> packageDeps = new ArrayList<>();
+        Pattern pkgPattern = Pattern.compile("^\\s*package\\s+([\\w.]+)\\s*;", Pattern.MULTILINE);
+        Pattern impPattern = Pattern.compile("^\\s*import\\s+(?:static\\s+)?([\\w.*]+)\\s*;", Pattern.MULTILINE);
+
+        for (Path file : javaFiles) {
+            String source;
+            try {
+                source = Files.readString(file);
+            } catch (IOException e) {
+                continue;
+            }
+            Matcher pm = pkgPattern.matcher(source);
+            if (!pm.find()) continue;
+            String pkg = pm.group(1);
+            allPackages.add(pkg);
+
+            Matcher im = impPattern.matcher(source);
+            while (im.find()) {
+                String imp = im.group(1);
+                if (imp.startsWith("java.") || imp.startsWith("javax.")) continue;
+                // Derive imported package from fully-qualified import
+                String importedPkg = imp.contains(".")
+                        ? imp.substring(0, imp.lastIndexOf('.')) : imp;
+                // Strip wildcard imports (e.g. "com.foo.*" -> "com.foo")
+                if (importedPkg.endsWith(".*")) importedPkg = importedPkg.substring(0, importedPkg.length() - 2);
+                packageDeps.add(Map.entry(pkg, importedPkg));
+            }
+        }
+
+        String blueprint = new InferBlueprint().infer(allPackages, packageDeps, depth);
+        System.out.print(blueprint);
+    }
+
+    // -------------------------------------------------------------------------
+    // Query subcommand
+    // -------------------------------------------------------------------------
+
+    private static void runQueryCommand(String[] args) {
+        Path repoPath = null;
+        Path blueprintPath = null;
+        int commitCount = 20;
+        String question = null;
+
+        for (int i = 1; i < args.length; i++) {
+            switch (args[i]) {
+                case "--repo"      -> repoPath = Path.of(args[++i]);
+                case "--blueprint" -> blueprintPath = Path.of(args[++i]);
+                case "--commits"   -> commitCount = Integer.parseInt(args[++i]);
+                default -> {
+                    if (!args[i].startsWith("--")) {
+                        question = args[i];
+                    } else {
+                        System.err.println("Unknown query argument: " + args[i]);
+                        System.exit(1);
+                    }
+                }
+            }
+        }
+
+        if (repoPath == null || blueprintPath == null || question == null) {
+            System.err.println("Usage: archtelemetry query --repo <path> --blueprint <path> \"question\"");
+            System.err.println("Requires ARCHTELEMETRY_API_KEY environment variable.");
+            System.exit(1);
+            return;
+        }
+
+        String apiKey = System.getenv("ARCHTELEMETRY_API_KEY");
+        if (apiKey == null || apiKey.isBlank()) {
+            System.err.println("ARCHTELEMETRY_API_KEY environment variable is not set.");
+            System.exit(1);
+            return;
+        }
+
+        Blueprint blueprint = BlueprintLoader.load(blueprintPath);
+        JavaDependencyResolver javaResolver = new JavaDependencyResolver(blueprint.modules());
+
+        GitSnapshotSource snapshotSource = new GitSnapshotSource(
+                repoPath, javaResolver,
+                root -> new TypeScriptDependencyResolver(blueprint.modules(), root),
+                Language.JAVA, new SnapshotConfig.LastN(commitCount));
+        GitHistorySource historySource = new GitHistorySource(
+                repoPath, new SnapshotConfig.LastN(commitCount));
+
+        AnalyzeSnapshot analyzeSnapshot = new AnalyzeSnapshot();
+        AnalyzeHistory analyzeHistory = new AnalyzeHistory(analyzeSnapshot);
+        ComputeMetrics computeMetrics = new ComputeMetrics(analyzeSnapshot);
+        ComputeGitStats computeGitStats = new ComputeGitStats();
+        ReportHealth reportHealth = new ReportHealth();
+
+        List<Snapshot> snapshots = snapshotSource.fetchSnapshots();
+        List<CommitEntry> history = historySource.fetchHistory();
+        Map<Module, ModuleGitStats> gitStats = computeGitStats.compute(blueprint, history);
+        Trend trend = analyzeHistory.analyze(blueprint, snapshots);
+        List<ArchitectureProfile> profiles = snapshots.stream()
+                .map(s -> computeMetrics.compute(blueprint, s, gitStats))
+                .toList();
+        HealthReport report = reportHealth.report(trend, profiles);
+        ArchitectureProfile profile = report.latestProfile() != null
+                ? report.latestProfile()
+                : new ArchitectureProfile(Set.of(), Set.of(), Set.of());
+
+        QueryArchitecture queryArchitecture = new QueryArchitecture(new AnthropicLlmClient(apiKey));
+        String answer = queryArchitecture.query(report, profile, question);
+        System.out.println(answer);
+    }
+
+    // -------------------------------------------------------------------------
+    // Incremental mode
     // -------------------------------------------------------------------------
 
     private static void runIncremental(Blueprint blueprint, LocatingDependencyResolver resolver,
                                        Path repoPath, Path srcDir,
                                        List<Path> changedFiles, String fileExt, String format) {
-        // Derive source dir for working-tree baseline when no --repo
         Path effectiveSrcDir = resolveSrcDir(repoPath, srcDir);
 
-        // Baseline snapshot
         Snapshot baseline;
         if (repoPath != null) {
-            // Single git HEAD commit — fast
             GitSnapshotSource snapshotSource = new GitSnapshotSource(
                     repoPath, resolver, new SnapshotConfig.LastN(1));
             List<Snapshot> snapshots = snapshotSource.fetchSnapshots();
             baseline = snapshots.isEmpty() ? emptySnapshot() : snapshots.get(0);
         } else {
-            // Full working-tree scan (no git)
             if (effectiveSrcDir == null || !Files.isDirectory(effectiveSrcDir)) {
                 System.err.println("--incremental without --repo requires --src <source-dir>");
                 System.exit(1);
@@ -212,7 +372,6 @@ public final class Main {
             baseline = new Snapshot("baseline", Instant.now(), data.dependencies(), data.moduleWmc());
         }
 
-        // Changed files — from args or stdin
         if (changedFiles.isEmpty()) {
             readChangedFilesFromStdin(changedFiles);
         }
@@ -258,7 +417,7 @@ public final class Main {
     }
 
     // -------------------------------------------------------------------------
-    // Watch mode — continuous incremental analysis via NIO WatchService
+    // Watch mode
     // -------------------------------------------------------------------------
 
     private static void runWatch(Blueprint blueprint, LocatingDependencyResolver resolver,
@@ -285,6 +444,15 @@ public final class Main {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    private static CoverageSource buildCoverageSource(Path coveragePath) {
+        if (coveragePath == null) return null;
+        String name = coveragePath.getFileName().toString().toLowerCase();
+        if (name.endsWith(".xml")) return new JacocoXmlCoverageSource(coveragePath);
+        if (name.equals("lcov.info") || name.endsWith(".lcov")) return new LcovCoverageSource(coveragePath);
+        // Fallback: try JaCoCo XML
+        return new JacocoXmlCoverageSource(coveragePath);
+    }
 
     private static Path resolveSrcDir(Path repoPath, Path srcDir) {
         if (srcDir != null) return srcDir;
@@ -365,6 +533,8 @@ public final class Main {
                   archtelemetry --repo <path> --blueprint <path> [options]
                   archtelemetry --blueprint <path> --incremental [--repo <path>] [--src <dir>] [--changed <files>...] [--format console|ai-feedback]
                   archtelemetry --blueprint <path> --watch [--repo <path>] [--src <dir>] [--format console|ai-feedback]
+                  archtelemetry infer --repo <path> [--depth 2]
+                  archtelemetry query --repo <path> --blueprint <path> "question"
                   archtelemetry --version
 
                 Options:
@@ -372,10 +542,15 @@ public final class Main {
                   --format <fmt>        console | json | markdown | html | ai-feedback
                   --out <file>          Write output to file (default: stdout)
                   --language <lang>     java | typescript | auto (default: java)
+                  --coverage <file>     JaCoCo XML or lcov.info for CRAP score computation
                   --fail-on <cond>      Exit 1 on: new-violations, any-violations, new-cycles,
                                         instability-threshold=<N>, stale-blueprint
                   --src <dir>           Source directory for watch/incremental (default: <repo>/src/main/java)
                   --changed <files>...  Changed files for --incremental (or pipe to stdin)
+
+                Environment:
+                  ARCHTELEMETRY_API_KEY  Anthropic API key (required for query subcommand)
+                  ARCHTELEMETRY_MODEL    Model to use for query (default: claude-haiku-4-5-20251001)
                 """);
         System.exit(1);
     }

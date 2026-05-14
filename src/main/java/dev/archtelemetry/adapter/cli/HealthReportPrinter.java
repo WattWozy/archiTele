@@ -69,6 +69,32 @@ public final class HealthReportPrinter {
                             moduleFlag(m)));
             System.out.println();
 
+            boolean hasCoverage = report.latestProfile().moduleMetrics().stream()
+                    .anyMatch(m -> m.crapScore() > 0);
+            boolean hasGraphMetrics = report.latestProfile().moduleMetrics().stream()
+                    .anyMatch(m -> m.pageRank() > 0);
+
+            if (hasGraphMetrics) {
+                System.out.println("--- Hub Scores (PageRank × Betweenness × WMC) ---");
+                System.out.printf("%-20s %10s %13s %10s%n", "Module", "PageRank", "Betweenness", "HubScore");
+                report.latestProfile().moduleMetrics().stream()
+                        .sorted(Comparator.comparingDouble(ModuleMetrics::hubScore).reversed())
+                        .forEach(m -> System.out.printf("%-20s %10.4f %13.4f %10.4f%n",
+                                m.module().name(), m.pageRank(), m.betweenness(), m.hubScore()));
+                System.out.println();
+            }
+
+            if (hasCoverage) {
+                System.out.println("--- Test Debt (CRAP Score) ---");
+                System.out.printf("%-20s %12s %13s%n", "Module", "CRAP Score", "Test Debt");
+                report.latestProfile().moduleMetrics().stream()
+                        .sorted(Comparator.comparingDouble(ModuleMetrics::testDebtScore).reversed())
+                        .filter(m -> m.crapScore() > 0)
+                        .forEach(m -> System.out.printf("%-20s %12.2f %13.2f%n",
+                                m.module().name(), m.crapScore(), m.testDebtScore()));
+                System.out.println();
+            }
+
             if (!report.latestProfile().refactoringSuggestions().isEmpty()) {
                 System.out.println("--- Refactoring Suggestions ---");
                 report.latestProfile().refactoringSuggestions().forEach(s -> {

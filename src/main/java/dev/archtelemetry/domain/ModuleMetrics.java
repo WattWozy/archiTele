@@ -10,7 +10,12 @@ public record ModuleMetrics(
         int wmc,
         double hotspot,
         double churnAcceleration,
-        double busFactorRisk
+        double busFactorRisk,
+        double crapScore,
+        double testDebtScore,
+        double pageRank,
+        double betweenness,
+        double hubScore
 ) {
     public static ModuleMetrics compute(Module module, int fanIn, int fanOut) {
         return compute(module, fanIn, fanOut, 0, null, 0.0);
@@ -28,6 +33,19 @@ public record ModuleMetrics(
         double churnAcceleration = gitStats != null ? gitStats.churnAcceleration() : 0.0;
         double busFactorRisk = gitStats != null ? gitStats.busFactorRisk() : 0.0;
         return new ModuleMetrics(module, fanIn, fanOut, instability, abstractness, distance,
-                wmc, hotspot, churnAcceleration, busFactorRisk);
+                wmc, hotspot, churnAcceleration, busFactorRisk,
+                0.0, 0.0, 0.0, 0.0, 0.0);
+    }
+
+    public ModuleMetrics withCoverage(double crapScore, double testDebtScore) {
+        return new ModuleMetrics(module, fanIn, fanOut, instability, abstractness, distanceFromMainSequence,
+                wmc, hotspot, churnAcceleration, busFactorRisk,
+                crapScore, testDebtScore, pageRank, betweenness, hubScore);
+    }
+
+    public ModuleMetrics withGraphMetrics(double pageRank, double betweenness, double hubScore) {
+        return new ModuleMetrics(module, fanIn, fanOut, instability, abstractness, distanceFromMainSequence,
+                wmc, hotspot, churnAcceleration, busFactorRisk,
+                crapScore, testDebtScore, pageRank, betweenness, hubScore);
     }
 }

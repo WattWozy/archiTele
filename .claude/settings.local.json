@@ -38,7 +38,8 @@
       "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar --blueprint frontend.blueprint --language typescript --incremental --repo . --changed frontend/domain/Entity.ts --format ai-feedback)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" -Recurse -Directory)",
       "Bash(Select-Object -ExpandProperty FullName)",
-      "Bash(Sort-Object)"
+      "Bash(Sort-Object)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" | Where-Object {$_.PSIsContainer -or $_.Name -ne \"target\"} | Select-Object Name, @{Name=\"Type\"; Expression={if \\($_.PSIsContainer\\) {\"Directory\"} else {\"File\"}}} | Sort-Object Name)"
     ]
   }
 }
