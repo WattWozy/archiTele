@@ -1,8 +1,8 @@
-# ArchTelemetry — AI Agent Integration Protocol
+# Arx — AI Agent Integration Protocol
 
 ## Overview
 
-ArchTelemetry provides a machine-readable feedback loop for AI coding agents. The agent generates code freely; ArchTelemetry enforces architectural invariants continuously. Zero violations = safe to commit.
+Arx provides a machine-readable feedback loop for AI coding agents. The agent generates code freely; Arx enforces architectural invariants continuously. Zero violations = safe to commit.
 
 ## Protocol
 
@@ -11,7 +11,7 @@ AI agent subprocess
        |
        | spawns
        v
-archtelemetry --watch --format ai-feedback --blueprint arch.blueprint --src src/main/java
+arx --watch --format ai-feedback --blueprint arch.blu --src src/main/java
        |
        | stdout: JSON violation arrays (one per file-change event)
        | stderr: human-readable status logs
@@ -28,8 +28,8 @@ git commit
 ### 1. Watch mode (continuous)
 
 ```bash
-archtelemetry --watch \
-  --blueprint arch.blueprint \
+arx --watch \
+  --blueprint arch.blu \
   --src src/main/java \
   --format ai-feedback
 ```
@@ -45,14 +45,14 @@ archtelemetry --watch \
 ```bash
 # From git diff
 git diff --name-only HEAD | \
-  archtelemetry --incremental \
-    --blueprint arch.blueprint \
+  arx --incremental \
+    --blueprint arch.blu \
     --repo . \
     --format ai-feedback
 
 # Explicit file list
-archtelemetry --incremental \
-  --blueprint arch.blueprint \
+arx --incremental \
+  --blueprint arch.blu \
   --repo . \
   --format ai-feedback \
   --changed src/main/java/com/example/Foo.java src/main/java/com/example/Bar.java
@@ -66,7 +66,7 @@ archtelemetry --incremental \
 ### 3. Normal mode (full report)
 
 ```bash
-archtelemetry --repo . --blueprint arch.blueprint --format ai-feedback
+arx --repo . --blueprint arch.blu --format ai-feedback
 ```
 
 - Full git history analysis
@@ -119,7 +119,7 @@ Fix hints are deterministic — derived from blueprint layer annotations, not AI
 import subprocess, json, sys
 
 proc = subprocess.Popen(
-    ["archtelemetry", "--watch", "--blueprint", "arch.blueprint",
+    ["arx", "--watch", "--blueprint", "arch.blu",
      "--src", "src/main/java", "--format", "ai-feedback"],
     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
 )
@@ -138,7 +138,7 @@ for line in proc.stdout:
 ### Cursor / generic subprocess
 
 Any tool that can read stdout from a subprocess can consume the JSON stream. Key rules:
-1. Spawn `archtelemetry --watch --format ai-feedback` as a subprocess
+1. Spawn `arx --watch --format ai-feedback` as a subprocess
 2. Read stdout line-by-line (each change event produces one JSON line)
 3. Parse as JSON array
 4. If array is non-empty, surface violations to the agent
@@ -153,8 +153,8 @@ Any tool that can read stdout from a subprocess can consume the JSON stream. Key
 CHANGED=$(git diff --cached --name-only --diff-filter=ACM | grep '\.java$')
 if [ -z "$CHANGED" ]; then exit 0; fi
 
-RESULT=$(echo "$CHANGED" | archtelemetry \
-  --incremental --blueprint arch.blueprint --repo . --format ai-feedback)
+RESULT=$(echo "$CHANGED" | arx \
+  --incremental --blueprint arch.blu --repo . --format ai-feedback)
 
 if [ "$RESULT" != "[]" ]; then
   echo "Architectural violations detected:"
@@ -166,7 +166,7 @@ fi
 ## Blueprint quick-reference
 
 ```
-# arch.blueprint
+# arch.blu
 module domain      dev.example.domain.**      layer=0
 module application dev.example.application.** layer=1
 module adapter     dev.example.adapter.**     layer=2

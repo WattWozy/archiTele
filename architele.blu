@@ -1,0 +1,26 @@
+# Arx self-describing blueprint
+#
+# Hexagonal architecture: domain (layer 0) → application (layer 1) → adapters (layer 2).
+# adapter-cli is the composition root — it wires the other two adapters, which is intentional
+# and reflected explicitly in the allow rules below.
+
+module domain       dev.archtelemetry.domain.**         layer=0
+module application  dev.archtelemetry.application.**    layer=1
+module adapter-cli  dev.archtelemetry.adapter.cli.**    layer=2
+module adapter-java dev.archtelemetry.adapter.java.**   layer=2
+module adapter-git  dev.archtelemetry.adapter.git.**    layer=2
+
+# Application depends only on domain (no adapters)
+allow application  -> domain
+
+# Each adapter may use application ports + domain types
+allow adapter-java -> application
+allow adapter-java -> domain
+allow adapter-git  -> application
+allow adapter-git  -> domain
+allow adapter-cli  -> application
+allow adapter-cli  -> domain
+
+# Composition root: cli wires the concrete adapters
+allow adapter-cli  -> adapter-java
+allow adapter-cli  -> adapter-git

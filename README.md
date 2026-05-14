@@ -1,4 +1,4 @@
-# ArchTelemetry
+# Arx
 
 Architecture health monitoring for Java and TypeScript codebases. Tracks dependency violations, module coupling, churn hotspots, and architectural drift over git history — all from a single binary.
 
@@ -6,13 +6,13 @@ Architecture health monitoring for Java and TypeScript codebases. Tracks depende
 
 ```bash
 # Generate a blueprint from your repo
-archtelemetry infer --repo .
+arx infer --repo .
 
 # Review the output, save it
-archtelemetry infer --repo . > arch.blueprint
+arx infer --repo . > arch.blu
 
 # Analyze architecture health
-archtelemetry scan --repo . --blueprint arch.blueprint
+arx scan --repo . --blueprint arch.blu
 ```
 
 That's it. Two commands, zero to value.
@@ -27,20 +27,20 @@ Download the binary for your platform from [GitHub Releases](https://github.com/
 
 | Platform | Binary |
 |----------|--------|
-| Linux x86-64 | `archtelemetry-linux-amd64` |
-| macOS arm64 | `archtelemetry-darwin-arm64` |
-| Windows x86-64 | `archtelemetry-windows-amd64.exe` |
+| Linux x86-64 | `arx-linux-amd64` |
+| macOS arm64 | `arx-darwin-arm64` |
+| Windows x86-64 | `arx-windows-amd64.exe` |
 
 ```bash
 # Linux / macOS
-chmod +x archtelemetry-linux-amd64
-mv archtelemetry-linux-amd64 /usr/local/bin/archtelemetry
+chmod +x arx-linux-amd64
+mv arx-linux-amd64 /usr/local/bin/arx
 ```
 
 ### Fat JAR (any platform with Java 21+)
 
 ```bash
-java -jar archtelemetry.jar scan --repo . --blueprint arch.blueprint
+java -jar arx.jar scan --repo . --blueprint arch.blu
 ```
 
 ### Build from source
@@ -49,7 +49,7 @@ Requires GraalVM 21.
 
 ```bash
 mvn package -Pnative -DskipTests
-# binary at target/archtelemetry
+# binary at target/arx
 ```
 
 ---
@@ -62,6 +62,8 @@ A blueprint is a plain-text file that declares your intended architecture. Two d
 module <name>  <package-pattern>  [layer=<N>]
 allow  <source> -> <target>
 ```
+
+Blueprint files conventionally use the `.blu` extension. The parser also accepts `.blueprint` for backward compatibility.
 
 **Example — clean layered architecture:**
 
@@ -80,8 +82,8 @@ Everything not in an `allow` rule is a violation. Modules at lower `layer` numbe
 ### Generating a blueprint with `infer`
 
 ```bash
-archtelemetry infer --repo . > arch.blueprint
-archtelemetry infer --repo . --depth 3 > arch.blueprint
+arx infer --repo . > arch.blu
+arx infer --repo . --depth 3 > arch.blu
 ```
 
 `infer` scans your source, groups packages by prefix depth, and emits `module` + `allow` declarations from observed imports. Edit the output to reflect your *intended* architecture (the inferred deps are your current actual deps — the point is to tighten them).
@@ -93,7 +95,7 @@ archtelemetry infer --repo . --depth 3 > arch.blueprint
 ### `scan` — full analysis report
 
 ```bash
-archtelemetry scan --repo <path> --blueprint <path> [options]
+arx scan --repo <path> --blueprint <path> [options]
 ```
 
 Analyzes git history, computes all metrics, and prints a health report.
@@ -112,17 +114,17 @@ Analyzes git history, computes all metrics, and prints a health report.
 
 ```bash
 # Console report (default)
-archtelemetry scan --repo . --blueprint arch.blueprint
+arx scan --repo . --blueprint arch.blu
 
 # Export HTML report
-archtelemetry scan --repo . --blueprint arch.blueprint --format html --out report.html
+arx scan --repo . --blueprint arch.blu --format html --out report.html
 
 # Analyze last 50 commits with coverage
-archtelemetry scan --repo . --blueprint arch.blueprint \
+arx scan --repo . --blueprint arch.blu \
   --commits 50 --coverage target/site/jacoco/jacoco.xml
 
 # TypeScript monorepo
-archtelemetry scan --repo . --blueprint arch.blueprint --language typescript
+arx scan --repo . --blueprint arch.blu --language typescript
 ```
 
 ---
@@ -130,7 +132,7 @@ archtelemetry scan --repo . --blueprint arch.blueprint --language typescript
 ### `check` — CI gate
 
 ```bash
-archtelemetry check --repo <path> --blueprint <path> [options]
+arx check --repo <path> --blueprint <path> [options]
 ```
 
 Like `scan` but designed for pipelines: silent on pass, exits 1 on violations.
@@ -161,9 +163,9 @@ Multiple `--fail-on` flags are OR'd together.
 ```yaml
 - name: Architecture check
   run: |
-    archtelemetry check \
+    arx check \
       --repo . \
-      --blueprint arch.blueprint \
+      --blueprint arch.blu \
       --fail-on new-violations \
       --fail-on new-cycles
 ```
@@ -173,7 +175,7 @@ Multiple `--fail-on` flags are OR'd together.
 ### `watch` — real-time feedback
 
 ```bash
-archtelemetry watch --blueprint <path> [options]
+arx watch --blueprint <path> [options]
 ```
 
 Two modes depending on whether `--changed` is provided:
@@ -181,15 +183,15 @@ Two modes depending on whether `--changed` is provided:
 **Filesystem watcher (continuous)** — monitors source files and re-analyzes on every save:
 
 ```bash
-archtelemetry watch --blueprint arch.blueprint --src src/main/java
-archtelemetry watch --blueprint arch.blueprint --repo .
+arx watch --blueprint arch.blu --src src/main/java
+arx watch --blueprint arch.blu --repo .
 ```
 
 **One-shot incremental** — analyzes only the listed changed files against the last committed baseline:
 
 ```bash
-archtelemetry watch --blueprint arch.blueprint --changed Foo.java Bar.java
-git diff --name-only | archtelemetry watch --blueprint arch.blueprint --changed
+arx watch --blueprint arch.blu --changed Foo.java Bar.java
+git diff --name-only | arx watch --blueprint arch.blu --changed
 ```
 
 | Flag | Default | Description |
@@ -204,7 +206,7 @@ git diff --name-only | archtelemetry watch --blueprint arch.blueprint --changed
 **AI harness mode** — incremental with `ai-feedback` format outputs structured JSON for AI coding assistants:
 
 ```bash
-archtelemetry watch --blueprint arch.blueprint \
+arx watch --blueprint arch.blu \
   --changed src/Foo.java \
   --format ai-feedback
 ```
@@ -214,7 +216,7 @@ archtelemetry watch --blueprint arch.blueprint \
 ### `infer` — blueprint generation
 
 ```bash
-archtelemetry infer --repo <path> [--depth 2]
+arx infer --repo <path> [--depth 2]
 ```
 
 | Flag | Default | Description |
@@ -229,15 +231,15 @@ Scans all `.java` files, groups by package prefix, and emits a blueprint draft. 
 ### `query` — natural language interface
 
 ```bash
-archtelemetry query --repo <path> --blueprint <path> "question"
+arx query --repo <path> --blueprint <path> "question"
 ```
 
 Asks an LLM about your architecture based on the current metrics and violations.
 
 ```bash
-archtelemetry query --repo . --blueprint arch.blueprint "where is my highest risk?"
-archtelemetry query --repo . --blueprint arch.blueprint "which modules should I refactor first?"
-archtelemetry query --repo . --blueprint arch.blueprint "explain the current violations"
+arx query --repo . --blueprint arch.blu "where is my highest risk?"
+arx query --repo . --blueprint arch.blu "which modules should I refactor first?"
+arx query --repo . --blueprint arch.blu "explain the current violations"
 ```
 
 | Flag | Default | Description |
@@ -246,7 +248,7 @@ archtelemetry query --repo . --blueprint arch.blueprint "explain the current vio
 | `--blueprint <path>` | — | Blueprint file (required) |
 | `--commits <n>` | 20 | Commits to include in context |
 
-Requires `ARCHTELEMETRY_API_KEY` (Anthropic API key). Optionally set `ARCHTELEMETRY_MODEL` to override the model (default: `claude-haiku-4-5-20251001`).
+Requires `ARX_API_KEY` (Anthropic API key). Optionally set `ARX_MODEL` to override the model (default: `claude-haiku-4-5-20251001`).
 
 ---
 
@@ -271,7 +273,7 @@ Every module in the latest snapshot gets these metrics:
 | **CRAP Score** | `Complexity² × (1 − coverage)²`. Requires `--coverage` |
 | **Test Debt** | Aggregate uncovered complexity. Requires `--coverage` |
 
-**Trend:** ArchTelemetry analyzes N commits, computing a snapshot at each one, and reports whether violations are IMPROVING, STABLE, or DEGRADING over time.
+**Trend:** Arx analyzes N commits, computing a snapshot at each one, and reports whether violations are IMPROVING, STABLE, or DEGRADING over time.
 
 **Violations** that persist 3+ snapshots are flagged as **chronic**.
 
@@ -299,8 +301,8 @@ Every module in the latest snapshot gets these metrics:
 
 | Variable | Description |
 |----------|-------------|
-| `ARCHTELEMETRY_API_KEY` | Anthropic API key (required for `query`) |
-| `ARCHTELEMETRY_MODEL` | Model for `query` (default: `claude-haiku-4-5-20251001`) |
+| `ARX_API_KEY` | Anthropic API key (required for `query`) |
+| `ARX_MODEL` | Model for `query` (default: `claude-haiku-4-5-20251001`) |
 
 ---
 
@@ -312,13 +314,13 @@ Pass a JaCoCo XML or lcov report to get CRAP scores and test debt per module:
 # Maven: generate coverage first
 mvn test jacoco:report
 
-archtelemetry scan --repo . --blueprint arch.blueprint \
+arx scan --repo . --blueprint arch.blu \
   --coverage target/site/jacoco/jacoco.xml
 ```
 
 ```bash
 # JavaScript/TypeScript with lcov
-archtelemetry scan --repo . --blueprint arch.blueprint \
+arx scan --repo . --blueprint arch.blu \
   --coverage coverage/lcov.info
 ```
 

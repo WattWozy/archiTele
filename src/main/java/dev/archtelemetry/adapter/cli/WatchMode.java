@@ -55,11 +55,11 @@ public final class WatchMode {
         ResolvedData initial = resolver.resolve(allFiles);
         Snapshot current = new Snapshot("watch-init", Instant.now(), initial.dependencies(), initial.moduleWmc());
 
-        System.err.println("[archtelemetry] Watching " + sourceDir
+        System.err.println("[arx] Watching " + sourceDir
                 + " (" + allFiles.size() + " " + fileExtension + " files, "
                 + current.dependencies().size() + " dependencies)");
         if (aiFeedback) {
-            System.err.println("[archtelemetry] Output: ai-feedback JSON (stdout)");
+            System.err.println("[arx] Output: ai-feedback JSON (stdout)");
         }
 
         WatchService watcher = FileSystems.getDefault().newWatchService();
@@ -103,7 +103,7 @@ public final class WatchMode {
                 Set<Path> remaining = WorkingTreeScanner.scanFiles(sourceDir, fileExtension);
                 ResolvedData fullData = resolver.resolve(remaining);
                 current = new Snapshot("watch-rescan", Instant.now(), fullData.dependencies(), fullData.moduleWmc());
-                System.err.println("[archtelemetry] " + Instant.now() + " — "
+                System.err.println("[arx] " + Instant.now() + " — "
                         + deleted.size() + " file(s) deleted, rescanned");
                 if (aiFeedback) {
                     AnalyzeSnapshot snap = new AnalyzeSnapshot();
@@ -119,7 +119,7 @@ public final class WatchMode {
                 IncrementalResult result = analyzeIncremental.analyze(modified, blueprint, current);
                 current = result.updatedSnapshot();
 
-                System.err.println("[archtelemetry] " + Instant.now() + " — "
+                System.err.println("[arx] " + Instant.now() + " — "
                         + modified.size() + " file(s) changed, "
                         + result.newViolations().size() + " new violation(s)");
 

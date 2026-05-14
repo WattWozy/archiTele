@@ -97,7 +97,7 @@ public final class Main {
                 case "--coverage"  -> coveragePath = Path.of(args[++i]);
                 default -> {
                     System.err.println("Unknown argument: " + args[i]);
-                    System.err.println("Usage: archtelemetry scan --repo <path> --blueprint <path> [options]");
+                    System.err.println("Usage: arx scan --repo <path> --blueprint <path> [options]");
                     System.exit(1);
                 }
             }
@@ -105,7 +105,7 @@ public final class Main {
 
         if (repoPath == null || blueprintPath == null) {
             System.err.println("scan requires --repo and --blueprint");
-            System.err.println("Usage: archtelemetry scan --repo <path> --blueprint <path>");
+            System.err.println("Usage: arx scan --repo <path> --blueprint <path>");
             System.err.println("  [--commits N] [--format console|json|markdown|html|ai-feedback]");
             System.err.println("  [--out file] [--language java|typescript|auto] [--coverage file]");
             System.exit(1);
@@ -149,7 +149,7 @@ public final class Main {
                 }
                 default -> {
                     System.err.println("Unknown argument: " + args[i]);
-                    System.err.println("Usage: archtelemetry watch --blueprint <path> [--src <dir>] [--repo <path>]");
+                    System.err.println("Usage: arx watch --blueprint <path> [--src <dir>] [--repo <path>]");
                     System.err.println("  [--language java|typescript|auto] [--format console|ai-feedback]");
                     System.err.println("  [--changed <files>...]");
                     System.exit(1);
@@ -159,7 +159,7 @@ public final class Main {
 
         if (blueprintPath == null) {
             System.err.println("watch requires --blueprint");
-            System.err.println("Usage: archtelemetry watch --blueprint <path> [--src <dir>] [--repo <path>]");
+            System.err.println("Usage: arx watch --blueprint <path> [--src <dir>] [--repo <path>]");
             System.err.println("  [--language java|typescript|auto] [--format console|ai-feedback]");
             System.err.println("  [--changed <files>...]  (omit for continuous filesystem watcher)");
             System.exit(1);
@@ -201,7 +201,7 @@ public final class Main {
                 case "--fail-on"   -> failOnConditions.add(args[++i]);
                 default -> {
                     System.err.println("Unknown argument: " + args[i]);
-                    System.err.println("Usage: archtelemetry check --repo <path> --blueprint <path> [options]");
+                    System.err.println("Usage: arx check --repo <path> --blueprint <path> [options]");
                     System.exit(1);
                 }
             }
@@ -209,7 +209,7 @@ public final class Main {
 
         if (repoPath == null || blueprintPath == null) {
             System.err.println("check requires --repo and --blueprint");
-            System.err.println("Usage: archtelemetry check --repo <path> --blueprint <path>");
+            System.err.println("Usage: arx check --repo <path> --blueprint <path>");
             System.err.println("  [--commits N] [--language java|typescript|auto] [--coverage file]");
             System.err.println("  [--fail-on new-violations|any-violations|new-cycles|stale-blueprint|instability-threshold=<N>]");
             System.exit(1);
@@ -244,7 +244,7 @@ public final class Main {
                 case "--language" -> { i++; /* java only for now */ }
                 default -> {
                     System.err.println("Unknown argument: " + args[i]);
-                    System.err.println("Usage: archtelemetry infer --repo <path> [--depth 2]");
+                    System.err.println("Usage: arx infer --repo <path> [--depth 2]");
                     System.exit(1);
                 }
             }
@@ -252,7 +252,7 @@ public final class Main {
 
         if (repoPath == null) {
             System.err.println("infer requires --repo");
-            System.err.println("Usage: archtelemetry infer --repo <path> [--depth 2]");
+            System.err.println("Usage: arx infer --repo <path> [--depth 2]");
             System.exit(1);
             return;
         }
@@ -316,7 +316,7 @@ public final class Main {
                         question = args[i];
                     } else {
                         System.err.println("Unknown argument: " + args[i]);
-                        System.err.println("Usage: archtelemetry query --repo <path> --blueprint <path> \"question\"");
+                        System.err.println("Usage: arx query --repo <path> --blueprint <path> \"question\"");
                         System.exit(1);
                     }
                 }
@@ -325,15 +325,15 @@ public final class Main {
 
         if (repoPath == null || blueprintPath == null || question == null) {
             System.err.println("query requires --repo, --blueprint, and a question");
-            System.err.println("Usage: archtelemetry query --repo <path> --blueprint <path> \"question\"");
-            System.err.println("Requires ARCHTELEMETRY_API_KEY environment variable.");
+            System.err.println("Usage: arx query --repo <path> --blueprint <path> \"question\"");
+            System.err.println("Requires ARX_API_KEY environment variable.");
             System.exit(1);
             return;
         }
 
-        String apiKey = System.getenv("ARCHTELEMETRY_API_KEY");
+        String apiKey = System.getenv("ARX_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
-            System.err.println("ARCHTELEMETRY_API_KEY environment variable is not set.");
+            System.err.println("ARX_API_KEY environment variable is not set.");
             System.exit(1);
             return;
         }
@@ -641,12 +641,12 @@ public final class Main {
 
     private static void printVersion() {
         String version = Main.class.getPackage().getImplementationVersion();
-        System.out.println("archtelemetry " + (version != null ? version : "dev"));
+        System.out.println("arx " + (version != null ? version : "dev"));
     }
 
     private static void printUsage() {
         System.err.println("""
-                Usage: archtelemetry <subcommand> [options]
+                Usage: arx <subcommand> [options]
 
                 Subcommands:
                   scan    Full analysis with git history — text, json, markdown, or html report
@@ -656,8 +656,8 @@ public final class Main {
                   query   Ask a natural language question about your architecture
 
                 Quick start:
-                  archtelemetry infer --repo .
-                  archtelemetry scan  --repo . --blueprint arch.blueprint
+                  arx infer --repo .
+                  arx scan  --repo . --blueprint arch.blu
 
                 Options:
                   --version, -v   Print version and exit
@@ -699,8 +699,8 @@ public final class Main {
                   "question"            Natural language question (positional)
 
                 Environment:
-                  ARCHTELEMETRY_API_KEY   Anthropic API key (required for query)
-                  ARCHTELEMETRY_MODEL     Model for query (default: claude-haiku-4-5-20251001)
+                  ARX_API_KEY   Anthropic API key (required for query)
+                  ARX_MODEL     Model for query (default: claude-haiku-4-5-20251001)
                 """);
     }
 }

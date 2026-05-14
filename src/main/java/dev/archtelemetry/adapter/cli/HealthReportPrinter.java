@@ -33,7 +33,7 @@ public final class HealthReportPrinter {
                             + ": no files matched this module in the latest snapshot"));
             System.out.println();
         }
-        System.out.println("ArchTelemetry Health Report");
+        System.out.println("Arx Health Report");
         System.out.println("===========================");
         System.out.println();
         System.out.printf("Snapshots analyzed : %d%n", snapshots.size());

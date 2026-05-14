@@ -119,7 +119,7 @@
                             </execution>
                         </executions>
                         <configuration>
-                            <imageName>archtelemetry</imageName>
+                            <imageName>arx</imageName>
                             <mainClass>dev.archtelemetry.adapter.cli.Main</mainClass>
                             <buildArgs>
                                 <buildArg>--no-fallback</buildArg>

@@ -1,0 +1,21 @@
+# PetClinic Architecture Blueprint
+#
+# Layers:
+#   0 = model  — shared base entities (BaseEntity, NamedEntity, Person)
+#               innermost, most stable, no outbound domain deps
+#   1 = owner  — owner/pet/visit bounded context (entities + repos + controllers)
+#   1 = vet    — veterinarian bounded context (entities + repos + controllers)
+#   2 = system — cross-cutting infrastructure (cache, web config, error handling)
+#
+# Intentional rules:
+#   owner and vet may use the shared model types — nothing else
+#   owner and vet are independent bounded contexts — no cross-deps
+#   system is pure infrastructure — no domain module imports
+
+module model  org.springframework.samples.petclinic.model.**  layer=0
+module owner  org.springframework.samples.petclinic.owner.**  layer=1
+module vet    org.springframework.samples.petclinic.vet.**    layer=1
+module system org.springframework.samples.petclinic.system.** layer=2
+
+allow owner -> model
+allow vet   -> model

@@ -26,7 +26,7 @@ public final class HtmlReportWriter {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ArchTelemetry Report</title>
+<title>Arx Report</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;background:#f1f5f9;color:#1e293b;font-size:15px}
@@ -78,7 +78,7 @@ canvas{display:block;border-radius:8px;border:1px solid #e2e8f0}
 <body>
 <div class="container">
 <header>
-  <h1>ArchTelemetry Health Report</h1>
+  <h1>Arx Health Report</h1>
   <div class="cards" id="summary-cards"></div>
 </header>
 

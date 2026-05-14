@@ -1,12 +1,12 @@
 #!/bin/sh
-# ArchTelemetry installer — detects OS/arch, downloads binary, places in /usr/local/bin
-# Usage: curl -sSL https://github.com/archtelemetry/archtelemetry/releases/latest/download/install.sh | sh
+# Arx installer — detects OS/arch, downloads binary, places in /usr/local/bin
+# Usage: curl -sSL https://github.com/WattWozy/archiTele/releases/latest/download/install.sh | sh
 
 set -e
 
-REPO="archtelemetry/archtelemetry"
-INSTALL_DIR="${ARCHTELEMETRY_INSTALL_DIR:-/usr/local/bin}"
-BINARY_NAME="archtelemetry"
+REPO="WattWozy/archiTele"
+INSTALL_DIR="${ARX_INSTALL_DIR:-/usr/local/bin}"
+BINARY_NAME="arx"
 
 die() { echo "Error: $1" >&2; exit 1; }
 
@@ -27,18 +27,18 @@ case "$ARCH" in
 esac
 
 # Resolve latest version if not pinned
-if [ -z "$ARCHTELEMETRY_VERSION" ]; then
+if [ -z "$ARX_VERSION" ]; then
   echo "Fetching latest release..."
-  ARCHTELEMETRY_VERSION=$(curl -sSf \
+  ARX_VERSION=$(curl -sSf \
     "https://api.github.com/repos/$REPO/releases/latest" \
     | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\(.*\)".*/\1/')
-  [ -n "$ARCHTELEMETRY_VERSION" ] || die "Could not determine latest release. Set ARCHTELEMETRY_VERSION manually."
+  [ -n "$ARX_VERSION" ] || die "Could not determine latest release. Set ARX_VERSION manually."
 fi
 
 ASSET="${BINARY_NAME}-${OS}-${ARCH}"
-URL="https://github.com/${REPO}/releases/download/${ARCHTELEMETRY_VERSION}/${ASSET}"
+URL="https://github.com/${REPO}/releases/download/${ARX_VERSION}/${ASSET}"
 
-echo "Installing archtelemetry ${ARCHTELEMETRY_VERSION} for ${OS}/${ARCH}..."
+echo "Installing arx ${ARX_VERSION} for ${OS}/${ARCH}..."
 echo "  Source : $URL"
 echo "  Dest   : ${INSTALL_DIR}/${BINARY_NAME}"
 
@@ -61,5 +61,5 @@ else
 fi
 
 echo ""
-echo "archtelemetry installed successfully."
-echo "Run: archtelemetry --version"
+echo "arx installed successfully."
+echo "Run: arx --version"

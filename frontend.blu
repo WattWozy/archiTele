@@ -1,0 +1,7 @@
+module ts-domain  frontend/domain/**         layer=0
+module ts-app     frontend/application/**    layer=1
+module ts-infra   frontend/infrastructure/** layer=2
+
+allow ts-app   -> ts-domain
+allow ts-infra -> ts-app
+allow ts-infra -> ts-domain

@@ -1,6 +1,6 @@
-name: ArchTelemetry
+name: Arx
 description: 'Architectural governance analysis — enforces blueprint invariants on every PR'
-author: 'archtelemetry'
+author: 'arx'
 
 inputs:
   repo:
@@ -21,7 +21,7 @@ inputs:
       Valid values: new-violations, any-violations, new-cycles, instability-threshold=<N>, stale-blueprint
     default: 'new-violations'
   version:
-    description: 'ArchTelemetry release tag to download (default: latest)'
+    description: 'Arx release tag to download (default: latest)'
     default: 'latest'
   post-pr-comment:
     description: 'Post a PR comment with the markdown report (true|false)'
@@ -32,31 +32,31 @@ outputs:
     description: 'Path to the generated report file'
     value: ${{ steps.run.outputs.report-path }}
   exit-code:
-    description: 'Exit code from archtelemetry (0 = pass, 1 = fail-on condition triggered)'
+    description: 'Exit code from arx (0 = pass, 1 = fail-on condition triggered)'
     value: ${{ steps.run.outputs.exit-code }}
 
 runs:
   using: composite
   steps:
-    - name: Download ArchTelemetry JAR
+    - name: Download Arx JAR
       shell: bash
       run: |
         VERSION="${{ inputs.version }}"
         if [ "$VERSION" = "latest" ]; then
-          VERSION=$(curl -sf https://api.github.com/repos/archtelemetry/archtelemetry/releases/latest \
+          VERSION=$(curl -sf https://api.github.com/repos/${{ github.repository }}/releases/latest \
             | grep '"tag_name"' | head -1 | cut -d'"' -f4)
         fi
-        echo "Downloading ArchTelemetry $VERSION"
+        echo "Downloading Arx $VERSION"
         curl -sSfL \
-          "https://github.com/archtelemetry/archtelemetry/releases/download/${VERSION}/archtelemetry.jar" \
-          -o "${{ github.action_path }}/archtelemetry.jar"
+          "https://github.com/${{ github.repository }}/releases/download/${VERSION}/arx.jar" \
+          -o "${{ github.action_path }}/arx.jar"
 
-    - name: Run ArchTelemetry
+    - name: Run Arx
       id: run
       shell: bash
       run: |
         EXT="${{ inputs.format == 'json' && 'json' || inputs.format == 'html' && 'html' || 'md' }}"
-        REPORT="archtelemetry-report.${EXT}"
+        REPORT="arx-report.${EXT}"
 
         ARGS="--repo ${{ inputs.repo }}"
         ARGS="$ARGS --blueprint ${{ inputs.blueprint }}"
@@ -71,7 +71,7 @@ runs:
         done
 
         set +e
-        java -jar "${{ github.action_path }}/archtelemetry.jar" $ARGS
+        java -jar "${{ github.action_path }}/arx.jar" $ARGS
         CODE=$?
         set -e
 
@@ -93,7 +93,7 @@ runs:
         if [ -f "$REPORT" ]; then
           # Replace existing bot comment if present, otherwise create new
           EXISTING=$(gh pr view ${{ github.event.pull_request.number }} \
-            --json comments --jq '.comments[] | select(.body | startswith("# ArchTelemetry")) | .databaseId' \
+            --json comments --jq '.comments[] | select(.body | startswith("# Arx")) | .databaseId' \
             2>/dev/null | head -1 || true)
           if [ -n "$EXISTING" ]; then
             gh api \

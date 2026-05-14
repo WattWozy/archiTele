@@ -20,7 +20,7 @@ public final class AnthropicLlmClient implements LlmClient {
     private final HttpClient httpClient;
 
     public AnthropicLlmClient(String apiKey) {
-        this(apiKey, System.getenv().getOrDefault("ARCHTELEMETRY_MODEL", DEFAULT_MODEL));
+        this(apiKey, System.getenv().getOrDefault("ARX_MODEL", DEFAULT_MODEL));
     }
 
     public AnthropicLlmClient(String apiKey, String model) {

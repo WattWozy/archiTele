@@ -1,0 +1,9 @@
+# Modules — package prefix patterns
+module domain      dev.archtelemetry.domain.**      layer=0
+module application dev.archtelemetry.application.** layer=1
+module adapter     dev.archtelemetry.adapter.**     layer=2
+
+# Allowed dependencies
+allow application -> domain
+allow adapter     -> application
+allow adapter     -> domain

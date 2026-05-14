@@ -36,7 +36,7 @@ jobs:
       - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
         with:
-          name: archtelemetry-jar
+          name: arx-jar
           path: target/archtelemetry-${{ steps.version.outputs.version }}.jar
           retention-days: 1
 
@@ -48,14 +48,14 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            asset-name: archtelemetry-linux-amd64
-            binary: archtelemetry
+            asset-name: arx-linux-amd64
+            binary: arx
           - os: macos-latest
-            asset-name: archtelemetry-darwin-arm64
-            binary: archtelemetry
+            asset-name: arx-darwin-arm64
+            binary: arx
           - os: windows-latest
-            asset-name: archtelemetry-windows-amd64.exe
-            binary: archtelemetry.exe
+            asset-name: arx-windows-amd64.exe
+            binary: arx.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -77,12 +77,12 @@ jobs:
 
       - name: Rename binary (non-Windows)
         if: runner.os != 'Windows'
-        run: mv target/archtelemetry "${{ matrix.asset-name }}"
+        run: mv target/arx "${{ matrix.asset-name }}"
 
       - name: Rename binary (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Move-Item target\archtelemetry.exe "${{ matrix.asset-name }}"
+        run: Move-Item target\arx.exe "${{ matrix.asset-name }}"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -106,7 +106,7 @@ jobs:
       - name: Compute checksums
         working-directory: dist
         run: |
-          find . -type f \( -name "*.jar" -o -name "archtelemetry-*" \) | sort | while read f; do
+          find . -type f \( -name "*.jar" -o -name "arx-*" \) | sort | while read f; do
             sha256sum "$f" >> ../SHA256SUMS.txt
           done
           cat ../SHA256SUMS.txt
@@ -117,7 +117,7 @@ jobs:
           VERSION: ${{ needs.build-jar.outputs.version }}
         run: |
           NOTES=$(cat <<EOF
-          ## ArchTelemetry v${VERSION}
+          ## Arx v${VERSION}
 
           ### Installation
 
@@ -128,26 +128,26 @@ jobs:
 
           **Homebrew:**
           \`\`\`bash
-          brew install ${{ github.repository_owner }}/tap/archtelemetry
+          brew install ${{ github.repository_owner }}/tap/arx
           \`\`\`
 
           **Direct download:**
           | Platform | Binary |
           |----------|--------|
-          | Linux x86-64 | \`archtelemetry-linux-amd64\` |
-          | macOS arm64 | \`archtelemetry-darwin-arm64\` |
-          | Windows x86-64 | \`archtelemetry-windows-amd64.exe\` |
-          | Any (JVM) | \`archtelemetry.jar\` |
+          | Linux x86-64 | \`arx-linux-amd64\` |
+          | macOS arm64 | \`arx-darwin-arm64\` |
+          | Windows x86-64 | \`arx-windows-amd64.exe\` |
+          | Any (JVM) | \`arx.jar\` |
           EOF
           )
 
           gh release create "v${VERSION}" \
             --title "v${VERSION}" \
             --notes "$NOTES" \
-            dist/archtelemetry-jar/archtelemetry-${VERSION}.jar#archtelemetry.jar \
-            dist/archtelemetry-linux-amd64/archtelemetry-linux-amd64 \
-            dist/archtelemetry-darwin-arm64/archtelemetry-darwin-arm64 \
-            dist/archtelemetry-windows-amd64.exe/archtelemetry-windows-amd64.exe \
+            dist/arx-jar/archtelemetry-${VERSION}.jar#arx.jar \
+            dist/arx-linux-amd64/arx-linux-amd64 \
+            dist/arx-darwin-arm64/arx-darwin-arm64 \
+            dist/arx-windows-amd64.exe/arx-windows-amd64.exe \
             SHA256SUMS.txt \
             install.sh
 
