@@ -39,7 +39,12 @@
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" -Recurse -Directory)",
       "Bash(Select-Object -ExpandProperty FullName)",
       "Bash(Sort-Object)",
-      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" | Where-Object {$_.PSIsContainer -or $_.Name -ne \"target\"} | Select-Object Name, @{Name=\"Type\"; Expression={if \\($_.PSIsContainer\\) {\"Directory\"} else {\"File\"}}} | Sort-Object Name)"
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" | Where-Object {$_.PSIsContainer -or $_.Name -ne \"target\"} | Select-Object Name, @{Name=\"Type\"; Expression={if \\($_.PSIsContainer\\) {\"Directory\"} else {\"File\"}}} | Sort-Object Name)",
+      "Bash(native-image --version)",
+      "Bash(java -version)",
+      "Bash(where archtelemetry *)",
+      "Bash(cat .github/workflows/*.yml)",
+      "Bash(ls .github/)"
     ]
   }
 }
