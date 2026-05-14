@@ -54,6 +54,11 @@ public final class Main {
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
+                case "--version", "-v" -> {
+                    String version = Main.class.getPackage().getImplementationVersion();
+                    System.out.println("archtelemetry " + (version != null ? version : "dev"));
+                    return;
+                }
                 case "--repo"        -> repoPath = Path.of(args[++i]);
                 case "--blueprint"   -> blueprintPath = Path.of(args[++i]);
                 case "--commits"     -> commitCount = Integer.parseInt(args[++i]);
@@ -360,6 +365,7 @@ public final class Main {
                   archtelemetry --repo <path> --blueprint <path> [options]
                   archtelemetry --blueprint <path> --incremental [--repo <path>] [--src <dir>] [--changed <files>...] [--format console|ai-feedback]
                   archtelemetry --blueprint <path> --watch [--repo <path>] [--src <dir>] [--format console|ai-feedback]
+                  archtelemetry --version
 
                 Options:
                   --commits <n>         Commits to analyze (default: 20)

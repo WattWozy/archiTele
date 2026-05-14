@@ -1,0 +1,166 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-jar:
+    name: Build fat JAR
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set release version
+        run: mvn versions:set -DnewVersion="${{ steps.version.outputs.version }}" --no-transfer-progress
+
+      - name: Build fat JAR
+        run: mvn package -DskipTests --no-transfer-progress
+
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: archtelemetry-jar
+          path: target/archtelemetry-${{ steps.version.outputs.version }}.jar
+          retention-days: 1
+
+  build-native:
+    name: Native binary (${{ matrix.os }})
+    needs: build-jar
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset-name: archtelemetry-linux-amd64
+            binary: archtelemetry
+          - os: macos-latest
+            asset-name: archtelemetry-darwin-arm64
+            binary: archtelemetry
+          - os: windows-latest
+            asset-name: archtelemetry-windows-amd64.exe
+            binary: archtelemetry.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          native-image-job-reports: 'true'
+
+      - name: Set release version
+        shell: bash
+        run: mvn versions:set -DnewVersion="${{ needs.build-jar.outputs.version }}" --no-transfer-progress
+
+      - name: Build native binary
+        shell: bash
+        run: mvn package -Pnative -DskipTests --no-transfer-progress
+
+      - name: Rename binary (non-Windows)
+        if: runner.os != 'Windows'
+        run: mv target/archtelemetry "${{ matrix.asset-name }}"
+
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Move-Item target\archtelemetry.exe "${{ matrix.asset-name }}"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset-name }}
+          path: ${{ matrix.asset-name }}
+          retention-days: 1
+
+  release:
+    name: Create GitHub Release
+    needs: [build-jar, build-native]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Compute checksums
+        working-directory: dist
+        run: |
+          find . -type f \( -name "*.jar" -o -name "archtelemetry-*" \) | sort | while read f; do
+            sha256sum "$f" >> ../SHA256SUMS.txt
+          done
+          cat ../SHA256SUMS.txt
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build-jar.outputs.version }}
+        run: |
+          NOTES=$(cat <<EOF
+          ## ArchTelemetry v${VERSION}
+
+          ### Installation
+
+          **curl installer (Linux / macOS):**
+          \`\`\`bash
+          curl -sSL https://github.com/${{ github.repository }}/releases/download/v${VERSION}/install.sh | sh
+          \`\`\`
+
+          **Homebrew:**
+          \`\`\`bash
+          brew install ${{ github.repository_owner }}/tap/archtelemetry
+          \`\`\`
+
+          **Direct download:**
+          | Platform | Binary |
+          |----------|--------|
+          | Linux x86-64 | \`archtelemetry-linux-amd64\` |
+          | macOS arm64 | \`archtelemetry-darwin-arm64\` |
+          | Windows x86-64 | \`archtelemetry-windows-amd64.exe\` |
+          | Any (JVM) | \`archtelemetry.jar\` |
+          EOF
+          )
+
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --notes "$NOTES" \
+            dist/archtelemetry-jar/archtelemetry-${VERSION}.jar#archtelemetry.jar \
+            dist/archtelemetry-linux-amd64/archtelemetry-linux-amd64 \
+            dist/archtelemetry-darwin-arm64/archtelemetry-darwin-arm64 \
+            dist/archtelemetry-windows-amd64.exe/archtelemetry-windows-amd64.exe \
+            SHA256SUMS.txt \
+            install.sh
+
+      - name: Trigger Homebrew tap update
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ needs.build-jar.outputs.version }}
+        run: |
+          if [ -n "$GH_TOKEN" ]; then
+            gh workflow run update-formula.yml \
+              --repo "${{ github.repository_owner }}/homebrew-tap" \
+              --field version="${VERSION}" \
+              --field repository="${{ github.repository }}"
+          else
+            echo "HOMEBREW_TAP_TOKEN not set — skipping tap update"
+          fi

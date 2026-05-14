@@ -330,3 +330,77 @@ Derived from `powers.md` priority list, mapped to phases above:
 ## Strategic positioning
 
 The core insight: as AI writes more code, architectural governance becomes more valuable, not less. Human architects can't review every AI-generated import. The blueprint encodes their judgment once; ArchTelemetry enforces it continuously. The tool doesn't restrict what AI can build — it restricts where things are allowed to know about each other. Maximum creative freedom within structural invariants.
+
+## Phase 9 — Deep Dependency Discovery
+
+**Goal:** Catch architectural violations that are invisible to import analysis — DI wiring, event coupling, and structural fragility.
+
+### 9.1 Scanner composition architecture
+
+The `DependencyResolver` port already returns `Set<Dependency>`. Nothing in the domain says dependencies must come from imports. Phase 9 decomposes each language resolver into composable scanners that all produce the same output type:
+
+```
+DependencyResolver (port)
+  └── JavaDependencyResolver (adapter)
+        ├── ImportScanner          — existing import parsing
+        ├── DiWiringScanner        — @Autowired, @Inject, @Component
+        └── EventCouplingScanner   — @EventListener, @KafkaListener, ApplicationEvent
+  └── TypeScriptDependencyResolver (adapter)
+        ├── ImportScanner          — existing import/require parsing
+        ├── DiWiringScanner        — @Injectable (NestJS), @injectable (Inversify)
+        └── EventCouplingScanner   — EventEmitter, @OnEvent, RxJS Subject
+```
+
+Each scanner is additive. The domain doesn't care how a dependency was discovered. Scanner composition is an outer-ring decision — open for extension, closed for modification.
+
+### 9.2 DI annotation scanning
+
+Scan for framework-specific injection annotations and treat the injected type as an implicit dependency, even when the import points to a port interface.
+
+**Java targets:** `@Autowired`, `@Inject` (Jakarta + javax), `@Component`/`@Service`/`@Repository` class-level wiring, Dagger `@Module`/`@Provides`.
+
+**Why it matters:** Spring makes it trivially easy to inject an infrastructure bean into a domain class. The import graph says clean (domain imports port interface). The annotation reveals the runtime wiring violates the blueprint.
+
+**Approach:** Regex-based annotation discovery in the adapter layer. No bytecode analysis — keep it static and fast. Flag when an annotated field's resolved type lives in a layer the blueprint forbids.
+
+### 9.3 Event and message coupling
+
+Build a shadow dependency graph: "module A publishes events that module B consumes." Compare against the blueprint.
+
+**Java targets:** Spring `ApplicationEvent` / `@EventListener`, Kafka `@KafkaListener` / `KafkaTemplate.send`, RabbitMQ `@RabbitListener`.
+
+**TypeScript targets:** `EventEmitter.emit` / `.on`, NestJS `@OnEvent`, RxJS `Subject.next` / `.subscribe`.
+
+**Detection:** Scan for publish patterns and subscribe patterns. Match on event type or topic string. Produce `Dependency` entries with a `RUNTIME_EVENT` kind so reports can distinguish them from import-level dependencies.
+
+**Key signal:** Temporal cycles — A imports B cleanly, but B subscribes to events A publishes. The import graph is acyclic. The runtime graph is circular.
+
+### 9.4 Structural fragility flags
+
+Lightweight static checks that extend existing metrics without requiring full semantic analysis:
+
+- **Routing hubs** — flag modules where fan-in > 3 AND fan-out > 3. Not complex, just a bottleneck. Complements betweenness centrality (Phase 8).
+- **Inheritance depth** — track transitive `extends` chains across modules. Flag when a class is 3+ levels deep from a base in a different module. "This class is fragile to changes 4 inheritance levels away."
+- **Interface width** — count methods on depended-upon interfaces. Flag interfaces with 10+ methods as ISP violation candidates. Full "which methods are actually called" analysis is Phase 10+ territory; method count alone is a useful early signal.
+
+### 9.5 Acknowledged limits
+
+Some coupling is invisible to static analysis at any depth:
+
+- **Shared mutable state** — two modules reading/writing the same DB table, cache key, or file with no code-level link. Requires external metadata (schema mappings, infrastructure manifests). Out of scope.
+- **Leaky abstraction semantics** — a port with domain-named methods but infrastructure-typed parameters (`RedisKey`, `RedisTTL`). Catching this requires classifying types as domain vs infrastructure concepts. Possible but needs a heuristic or user-provided type classification. Deferred.
+- **Runtime reflection beyond DI** — `Class.forName()`, `Method.invoke()`, dynamic proxies. Unbounded problem. Not targeted.
+
+### Dependency map
+
+```
+Phase 9.1 (scanner composition) — no dependencies, refactor only
+Phase 9.2 (DI scanning)         — depends on 9.1
+Phase 9.3 (event coupling)      — depends on 9.1
+Phase 9.4 (fragility flags)     — independent, uses existing metrics
+Phase 9.5                       — documentation only
+```
+
+### Design constraint
+
+Every scanner produces `Set<Dependency>`. Every new dependency kind gets a `DependencyKind` enum variant (`IMPORT`, `DI_INJECTION`, `RUNTIME_EVENT`, `INHERITANCE`). The domain model, violation detection, and reporting all work unchanged — they already operate on dependencies, not on imports.
