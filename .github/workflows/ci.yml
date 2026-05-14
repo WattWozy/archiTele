@@ -40,5 +40,5 @@ jobs:
 
       - name: Smoke test binary
         run: |
-          ./target/archtelemetry --version
+          ./target/arx --version
           echo "--version exit code: $?"
