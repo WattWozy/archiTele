@@ -252,6 +252,77 @@ Requires `ARX_API_KEY` (Anthropic API key). Optionally set `ARX_MODEL` to overri
 
 ---
 
+### `mcp-serve` — MCP server for AI tools
+
+```bash
+arx mcp-serve
+```
+
+Starts an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server on stdio. Lets Claude Code and other MCP-compatible AI tools call arx directly as a set of structured tools — no shell commands, no parsing, just typed inputs and structured JSON output.
+
+#### Setting up with Claude Code
+
+Add to your project's `.claude/settings.json` (or `~/.claude/settings.json` for global):
+
+**Native binary:**
+```json
+{
+  "mcpServers": {
+    "arx": {
+      "command": "arx",
+      "args": ["mcp-serve"]
+    }
+  }
+}
+```
+
+**Fat JAR:**
+```json
+{
+  "mcpServers": {
+    "arx": {
+      "command": "java",
+      "args": ["-jar", "/path/to/arx.jar", "mcp-serve"]
+    }
+  }
+}
+```
+
+Restart Claude Code after editing. The tools appear automatically — Claude will use them when you ask architecture questions.
+
+#### Available tools
+
+| Tool | Maps to | Description |
+|------|---------|-------------|
+| `check_violations` | `arx check` | Violations in the repo or filtered to specific files |
+| `get_metrics` | `arx scan` (metrics) | Per-module instability, fan-in/out, hotspot, CRAP, hub score |
+| `infer_blueprint` | `arx infer` | Infer a blueprint from package structure |
+| `scan_report` | `arx scan` | Full report: violations, cycles, chronics, trend, metrics |
+| `query_architecture` | `arx query` | Natural language question answered with full context |
+| `get_violation_trend` | — | Violation counts per commit over N recent commits |
+
+#### Example prompts in Claude Code
+
+```
+What are the current architecture violations in my repo at /Users/me/myapp using arch.blu?
+
+Which modules are highest risk? Use arx get_metrics on /Users/me/myapp.
+
+Infer a blueprint for /Users/me/myapp and show me the module structure.
+
+Run a full architecture scan on /Users/me/myapp — I want to see cycles, chronics, and hotspots.
+```
+
+Claude will call the appropriate tool, receive structured JSON, and reason over the results directly.
+
+#### Notes
+
+- `query_architecture` requires `ARX_API_KEY` in the environment where `arx mcp-serve` runs
+- All tools accept absolute paths for `repo` and `blueprint`
+- The server logs to stderr; stdout is exclusively JSON-RPC
+
+---
+
 ## Metrics reference
 
 Every module in the latest snapshot gets these metrics:

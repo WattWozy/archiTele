@@ -3,6 +3,7 @@ package dev.archtelemetry.adapter.cli;
 import dev.archtelemetry.adapter.coverage.JacocoXmlCoverageSource;
 import dev.archtelemetry.adapter.coverage.LcovCoverageSource;
 import dev.archtelemetry.adapter.git.GitHistorySource;
+import dev.archtelemetry.adapter.mcp.ArxMcpServer;
 import dev.archtelemetry.adapter.git.GitSnapshotSource;
 import dev.archtelemetry.adapter.git.Language;
 import dev.archtelemetry.adapter.git.SnapshotConfig;
@@ -64,6 +65,7 @@ public final class Main {
             case "check"           -> runCheckCommand(args);
             case "infer"           -> runInferCommand(args);
             case "query"           -> runQueryCommand(args);
+            case "mcp-serve"       -> new ArxMcpServer(BlueprintLoader::load, WorkingTreeScanner::scanJavaFiles).run();
             default -> {
                 System.err.println("Unknown subcommand: " + args[0]);
                 System.err.println();
@@ -653,7 +655,8 @@ public final class Main {
                   watch   Real-time feedback loop — filesystem watcher or one-shot incremental
                   check   CI gate — minimal output, exit 1 on violations
                   infer   Generate a blueprint draft from source code
-                  query   Ask a natural language question about your architecture
+                  query     Ask a natural language question about your architecture
+                  mcp-serve Start an MCP server on stdio (for Claude Code / AI tools)
 
                 Quick start:
                   arx infer --repo .
