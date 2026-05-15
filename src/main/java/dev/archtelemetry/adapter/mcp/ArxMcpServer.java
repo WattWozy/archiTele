@@ -21,23 +21,30 @@ import dev.archtelemetry.application.ReportHealth;
 import dev.archtelemetry.application.port.BlueprintSource;
 import dev.archtelemetry.application.port.CoverageSource;
 import dev.archtelemetry.application.port.JavaFileScanner;
+import dev.archtelemetry.application.port.ScanResultStore;
 import dev.archtelemetry.domain.ArchitectureProfile;
 import dev.archtelemetry.domain.Blueprint;
 import dev.archtelemetry.domain.CommitEntry;
 import dev.archtelemetry.domain.DependencyCycle;
+import dev.archtelemetry.domain.Hotspot;
+import dev.archtelemetry.domain.HotspotSnapshot;
+import dev.archtelemetry.domain.MetricSnapshot;
 import dev.archtelemetry.domain.Module;
 import dev.archtelemetry.domain.ModuleGitStats;
 import dev.archtelemetry.domain.ModuleMetrics;
+import dev.archtelemetry.domain.ScanRecord;
 import dev.archtelemetry.domain.Snapshot;
 import dev.archtelemetry.domain.Trend;
 import dev.archtelemetry.domain.Violation;
 import dev.archtelemetry.domain.ViolationRecord;
+import dev.archtelemetry.domain.ViolationTrend;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -62,21 +69,33 @@ public final class ArxMcpServer {
     private final ToolExecutor executor;
     private final BlueprintSource blueprintSource;
     private final JavaFileScanner javaFileScanner;
+    private final ScanResultStore store;
 
     public ArxMcpServer(BlueprintSource blueprintSource, JavaFileScanner javaFileScanner) {
-        this(System.out, System.err, null, blueprintSource, javaFileScanner);
+        this(System.out, System.err, null, blueprintSource, javaFileScanner, null);
+    }
+
+    public ArxMcpServer(BlueprintSource blueprintSource, JavaFileScanner javaFileScanner, ScanResultStore store) {
+        this(System.out, System.err, null, blueprintSource, javaFileScanner, store);
     }
 
     ArxMcpServer(PrintStream stdout, PrintStream stderr, ToolExecutor executor) {
-        this(stdout, stderr, executor, null, null);
+        this(stdout, stderr, executor, null, null, null);
     }
 
     ArxMcpServer(PrintStream stdout, PrintStream stderr, ToolExecutor executor,
                  BlueprintSource blueprintSource, JavaFileScanner javaFileScanner) {
+        this(stdout, stderr, executor, blueprintSource, javaFileScanner, null);
+    }
+
+    ArxMcpServer(PrintStream stdout, PrintStream stderr, ToolExecutor executor,
+                 BlueprintSource blueprintSource, JavaFileScanner javaFileScanner,
+                 ScanResultStore store) {
         this.stdout = stdout;
         this.stderr = stderr;
         this.blueprintSource = blueprintSource;
         this.javaFileScanner = javaFileScanner;
+        this.store = store;
         this.executor = executor != null ? executor : this::defaultExecute;
     }
 
@@ -208,6 +227,39 @@ public final class ArxMcpServer {
                 + "\"last_n_commits\":{\"type\":\"integer\",\"description\":\"Number of recent commits (default: 10)\",\"default\":10}"
                 + "},"
                 + "\"required\":[\"repo\",\"blueprint\"]"
+                + "}"),
+            toolDef("get_metric_history",
+                "Get metric trends over time for a module (instability, abstractness, hub score)",
+                "{"
+                + "\"type\": \"object\","
+                + "\"properties\":{"
+                + "\"repo\":{\"type\":\"string\",\"description\":\"Path to git repository\"},"
+                + "\"module\":{\"type\":\"string\",\"description\":\"Module name\"},"
+                + "\"last_n_commits\":{\"type\":\"integer\",\"description\":\"Number of recent commits (default: 10)\",\"default\":10}"
+                + "},"
+                + "\"required\":[\"repo\",\"module\"]"
+                + "}"),
+            toolDef("get_hotspot_history",
+                "Get hotspot score history for a specific file or module",
+                "{"
+                + "\"type\": \"object\","
+                + "\"properties\":{"
+                + "\"repo\":{\"type\":\"string\",\"description\":\"Path to git repository\"},"
+                + "\"file\":{\"type\":\"string\",\"description\":\"File path or module name\"},"
+                + "\"last_n_commits\":{\"type\":\"integer\",\"description\":\"Number of recent commits (default: 10)\",\"default\":10}"
+                + "},"
+                + "\"required\":[\"repo\",\"file\"]"
+                + "}"),
+            toolDef("is_scanned",
+                "Check if a commit has already been scanned with the current blueprint",
+                "{"
+                + "\"type\": \"object\","
+                + "\"properties\":{"
+                + "\"repo\":{\"type\":\"string\",\"description\":\"Path to git repository\"},"
+                + "\"commit\":{\"type\":\"string\",\"description\":\"Commit hash\"},"
+                + "\"blueprint\":{\"type\":\"string\",\"description\":\"Path to blueprint (.blu) file\"}"
+                + "},"
+                + "\"required\":[\"repo\",\"commit\",\"blueprint\"]"
                 + "}")
         };
         for (int i = 0; i < defs.length; i++) {
@@ -254,6 +306,9 @@ public final class ArxMcpServer {
             case "scan_report"         -> runScanReport(argumentsJson);
             case "query_architecture"  -> runQueryArchitecture(argumentsJson);
             case "get_violation_trend" -> runGetViolationTrend(argumentsJson);
+            case "get_metric_history"  -> runGetMetricHistory(argumentsJson);
+            case "get_hotspot_history" -> runGetHotspotHistory(argumentsJson);
+            case "is_scanned"          -> runIsScanned(argumentsJson);
             default -> throw new IllegalArgumentException("Unknown tool: " + name);
         };
     }
@@ -539,9 +594,138 @@ public final class ArxMcpServer {
         String moduleFilter = McpJson.getString(argsJson, "module");
         int lastN           = McpJson.getInt(argsJson, "last_n_commits", 10);
 
-        ScanResult scan = buildFullReport(repoStr, blueprintStr, lastN, null);
-        List<Trend.SnapshotEntry> entries = scan.trend.entries();
+        if (store != null) {
+            List<ViolationTrend> trends = store.getViolationTrend(repoStr, moduleFilter, lastN);
+            if (!trends.isEmpty()) {
+                return formatViolationTrendFromDb(trends);
+            }
+        }
 
+        ScanResult scan = buildFullReport(repoStr, blueprintStr, lastN, null);
+        persistScanResults(repoStr, blueprintStr, scan);
+        return formatViolationTrendFromScan(scan, moduleFilter);
+    }
+
+    private String runGetMetricHistory(String argsJson) {
+        String repoStr = requireString(argsJson, "repo");
+        String module  = requireString(argsJson, "module");
+        int lastN      = McpJson.getInt(argsJson, "last_n_commits", 10);
+
+        if (store == null) return "{\"history\": []}";
+        List<MetricSnapshot> history = store.getMetricHistory(repoStr, module, lastN);
+        List<String> lines = history.stream().map(ms ->
+                "    {\n"
+                + "      \"commit\": " + McpJson.escape(ms.commitHash()) + ",\n"
+                + "      \"timestamp\": " + McpJson.escape(ms.timestamp().toString()) + ",\n"
+                + "      \"instability\": " + fmt(ms.instability()) + ",\n"
+                + "      \"abstractness\": " + fmt(ms.abstractness()) + ",\n"
+                + "      \"hubScore\": " + fmt(ms.hubScore()) + ",\n"
+                + "      \"fanIn\": " + ms.fanIn() + ",\n"
+                + "      \"fanOut\": " + ms.fanOut() + ",\n"
+                + "      \"wmc\": " + ms.wmc() + ",\n"
+                + "      \"crapScore\": " + fmt(ms.crapScore()) + ",\n"
+                + "      \"pageRank\": " + fmt(ms.pageRank()) + ",\n"
+                + "      \"betweenness\": " + fmt(ms.betweenness()) + "\n"
+                + "    }").toList();
+        StringBuilder sb = new StringBuilder("{\n  \"history\": [\n");
+        sb.append(String.join(",\n", lines));
+        if (!lines.isEmpty()) sb.append("\n");
+        sb.append("  ]\n}");
+        return sb.toString();
+    }
+
+    private String runGetHotspotHistory(String argsJson) {
+        String repoStr  = requireString(argsJson, "repo");
+        String filePath = requireString(argsJson, "file");
+        int lastN       = McpJson.getInt(argsJson, "last_n_commits", 10);
+
+        if (store == null) return "{\"history\": []}";
+        List<HotspotSnapshot> history = store.getHotspotHistory(repoStr, filePath, lastN);
+        List<String> lines = history.stream().map(hs ->
+                "    {\n"
+                + "      \"commit\": " + McpJson.escape(hs.commitHash()) + ",\n"
+                + "      \"timestamp\": " + McpJson.escape(hs.timestamp().toString()) + ",\n"
+                + "      \"churn\": " + hs.churn() + ",\n"
+                + "      \"complexity\": " + hs.complexity() + ",\n"
+                + "      \"score\": " + fmt(hs.score()) + "\n"
+                + "    }").toList();
+        StringBuilder sb = new StringBuilder("{\n  \"history\": [\n");
+        sb.append(String.join(",\n", lines));
+        if (!lines.isEmpty()) sb.append("\n");
+        sb.append("  ]\n}");
+        return sb.toString();
+    }
+
+    private String runIsScanned(String argsJson) {
+        String repoStr      = requireString(argsJson, "repo");
+        String commit       = requireString(argsJson, "commit");
+        String blueprintStr = requireString(argsJson, "blueprint");
+
+        if (store == null) return "{\"scanned\": false}";
+        String blueprintHash = computeBlueprintHash(blueprintStr);
+        boolean scanned = store.hasBeenScanned(repoStr, commit, blueprintHash);
+        return "{\"scanned\": " + scanned + "}";
+    }
+
+    // -------------------------------------------------------------------------
+    // Persistence helpers
+    // -------------------------------------------------------------------------
+
+    private void persistScanResults(String repoStr, String blueprintStr, ScanResult scan) {
+        if (store == null) return;
+        String blueprintHash = computeBlueprintHash(blueprintStr);
+        List<Snapshot> snapshots = scan.snapshots;
+        List<ArchitectureProfile> profiles = scan.profiles;
+        for (int i = 0; i < snapshots.size(); i++) {
+            Snapshot snap = snapshots.get(i);
+            ArchitectureProfile profile = profiles.get(i);
+            List<Hotspot> hotspots = profile.moduleMetrics().stream()
+                    .filter(m -> m.hotspot() > 0)
+                    .map(m -> new Hotspot(m.module().name(), 0, m.wmc(), m.hotspot()))
+                    .toList();
+            ScanRecord record = new ScanRecord(
+                    repoStr, snap.commitId(), snap.timestamp(), blueprintHash,
+                    new ArrayList<>(profile.violations()),
+                    new ArrayList<>(profile.moduleMetrics()),
+                    hotspots);
+            try {
+                store.storeScanResult(record);
+            } catch (Exception e) {
+                stderr.println("[arx mcp] warning: failed to persist scan: " + e.getMessage());
+            }
+        }
+    }
+
+    private static String computeBlueprintHash(String blueprintPath) {
+        try {
+            byte[] content = Files.readAllBytes(Path.of(blueprintPath));
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(content);
+            StringBuilder sb = new StringBuilder(64);
+            for (byte b : hash) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
+    private static String formatViolationTrendFromDb(List<ViolationTrend> trends) {
+        List<String> tLines = trends.stream().map(t ->
+                "    {\n"
+                + "      \"commit\": " + McpJson.escape(t.commitHash()) + ",\n"
+                + "      \"timestamp\": " + McpJson.escape(t.timestamp().toString()) + ",\n"
+                + "      \"violationCount\": " + t.violationCount() + ",\n"
+                + "      \"modules\": {}\n"
+                + "    }").toList();
+        StringBuilder sb = new StringBuilder("{\n  \"trend\": [\n");
+        sb.append(String.join(",\n", tLines));
+        if (!tLines.isEmpty()) sb.append("\n");
+        sb.append("  ]\n}");
+        return sb.toString();
+    }
+
+    private static String formatViolationTrendFromScan(ScanResult scan, String moduleFilter) {
+        List<Trend.SnapshotEntry> entries = scan.trend.entries();
         List<String> tLines = new ArrayList<>();
         for (int i = 0; i < entries.size(); i++) {
             Trend.SnapshotEntry entry = entries.get(i);
@@ -555,7 +739,6 @@ public final class ArxMcpServer {
             }
             Map<String, Long> perModule = vs.stream().collect(
                     Collectors.groupingBy(v -> v.dependency().source().name(), Collectors.counting()));
-
             StringBuilder modSb = new StringBuilder("{");
             boolean first = true;
             for (Map.Entry<String, Long> e : new TreeMap<>(perModule).entrySet()) {
@@ -564,7 +747,6 @@ public final class ArxMcpServer {
                 first = false;
             }
             modSb.append("}");
-
             final int count = vs.size();
             tLines.add("    {\n"
                     + "      \"commit\": " + McpJson.escape(entry.commitId()) + ",\n"
@@ -573,7 +755,6 @@ public final class ArxMcpServer {
                     + "      \"modules\": " + modSb + "\n"
                     + "    }");
         }
-
         StringBuilder sb = new StringBuilder("{\n  \"trend\": [\n");
         sb.append(String.join(",\n", tLines));
         if (!tLines.isEmpty()) sb.append("\n");
@@ -585,7 +766,7 @@ public final class ArxMcpServer {
     // Shared scan pipeline
     // -------------------------------------------------------------------------
 
-    private record ScanResult(HealthReport report, Trend trend, List<Snapshot> snapshots, Blueprint blueprint) {}
+    private record ScanResult(HealthReport report, Trend trend, List<Snapshot> snapshots, Blueprint blueprint, List<ArchitectureProfile> profiles) {}
 
     private ScanResult buildFullReport(String repoStr, String blueprintStr,
                                        int commitCount, String coverageStr) {
@@ -611,7 +792,7 @@ public final class ArxMcpServer {
                 .map(s -> new ComputeMetrics(analyzeSnapshot).compute(blueprint, s, gitStats, coverageSource))
                 .toList();
         HealthReport report = new ReportHealth().report(trend, profiles);
-        return new ScanResult(report, trend, snapshots, blueprint);
+        return new ScanResult(report, trend, snapshots, blueprint, profiles);
     }
 
     private static CoverageSource buildCoverageSource(Path coveragePath) {

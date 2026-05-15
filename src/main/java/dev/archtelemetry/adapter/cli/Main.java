@@ -9,6 +9,7 @@ import dev.archtelemetry.adapter.git.Language;
 import dev.archtelemetry.adapter.git.SnapshotConfig;
 import dev.archtelemetry.adapter.java.JavaDependencyResolver;
 import dev.archtelemetry.adapter.llm.AnthropicLlmClient;
+import dev.archtelemetry.adapter.persistence.H2ScanResultStore;
 import dev.archtelemetry.adapter.typescript.TypeScriptDependencyResolver;
 import dev.archtelemetry.application.AnalyzeHistory;
 import dev.archtelemetry.application.AnalyzeIncremental;
@@ -25,11 +26,14 @@ import dev.archtelemetry.application.port.CoverageSource;
 import dev.archtelemetry.application.port.LocatingDependencyResolver;
 import dev.archtelemetry.application.port.ResolvedData;
 import dev.archtelemetry.application.port.ResolvedDataWithLocations;
+import dev.archtelemetry.application.port.ScanResultStore;
 import dev.archtelemetry.domain.ArchitectureProfile;
 import dev.archtelemetry.domain.Blueprint;
 import dev.archtelemetry.domain.CommitEntry;
+import dev.archtelemetry.domain.Hotspot;
 import dev.archtelemetry.domain.Module;
 import dev.archtelemetry.domain.ModuleGitStats;
+import dev.archtelemetry.domain.ScanRecord;
 import dev.archtelemetry.domain.Snapshot;
 import dev.archtelemetry.domain.StaleModuleWarning;
 import dev.archtelemetry.domain.Trend;
@@ -38,6 +42,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -65,7 +70,7 @@ public final class Main {
             case "check"           -> runCheckCommand(args);
             case "infer"           -> runInferCommand(args);
             case "query"           -> runQueryCommand(args);
-            case "mcp-serve"       -> new ArxMcpServer(BlueprintLoader::load, WorkingTreeScanner::scanJavaFiles).run();
+            case "mcp-serve"       -> runMcpServe(args);
             default -> {
                 System.err.println("Unknown subcommand: " + args[0]);
                 System.err.println();
@@ -87,6 +92,7 @@ public final class Main {
         int commitCount = 20;
         String format = "console";
         String language = "java";
+        String dbPath = null;
 
         for (int i = 1; i < args.length; i++) {
             switch (args[i]) {
@@ -97,6 +103,7 @@ public final class Main {
                 case "--out"       -> outPath = Path.of(args[++i]);
                 case "--language"  -> language = args[++i];
                 case "--coverage"  -> coveragePath = Path.of(args[++i]);
+                case "--db"        -> dbPath = args[++i];
                 default -> {
                     System.err.println("Unknown argument: " + args[i]);
                     System.err.println("Usage: arx scan --repo <path> --blueprint <path> [options]");
@@ -109,7 +116,7 @@ public final class Main {
             System.err.println("scan requires --repo and --blueprint");
             System.err.println("Usage: arx scan --repo <path> --blueprint <path>");
             System.err.println("  [--commits N] [--format console|json|markdown|html|ai-feedback]");
-            System.err.println("  [--out file] [--language java|typescript|auto] [--coverage file]");
+            System.err.println("  [--out file] [--language java|typescript|auto] [--coverage file] [--db file]");
             System.exit(1);
             return;
         }
@@ -118,9 +125,11 @@ public final class Main {
         JavaDependencyResolver javaResolver = new JavaDependencyResolver(blueprint.modules());
         Language lang = parseLanguage(language);
         CoverageSource coverageSource = buildCoverageSource(coveragePath);
+        ScanResultStore store = createStore(dbPath);
+        String blueprintHash = computeBlueprintHash(blueprintPath);
 
         runNormal(blueprint, javaResolver, lang, blueprint.modules(), repoPath, commitCount,
-                format, outPath, List.of(), coverageSource);
+                format, outPath, List.of(), coverageSource, store, blueprintHash);
     }
 
     // -------------------------------------------------------------------------
@@ -191,6 +200,7 @@ public final class Main {
         Path coveragePath = null;
         int commitCount = 20;
         String language = "java";
+        String dbPath = null;
         List<String> failOnConditions = new ArrayList<>();
 
         for (int i = 1; i < args.length; i++) {
@@ -200,6 +210,7 @@ public final class Main {
                 case "--commits"   -> commitCount = Integer.parseInt(args[++i]);
                 case "--language"  -> language = args[++i];
                 case "--coverage"  -> coveragePath = Path.of(args[++i]);
+                case "--db"        -> dbPath = args[++i];
                 case "--fail-on"   -> failOnConditions.add(args[++i]);
                 default -> {
                     System.err.println("Unknown argument: " + args[i]);
@@ -212,7 +223,7 @@ public final class Main {
         if (repoPath == null || blueprintPath == null) {
             System.err.println("check requires --repo and --blueprint");
             System.err.println("Usage: arx check --repo <path> --blueprint <path>");
-            System.err.println("  [--commits N] [--language java|typescript|auto] [--coverage file]");
+            System.err.println("  [--commits N] [--language java|typescript|auto] [--coverage file] [--db file]");
             System.err.println("  [--fail-on new-violations|any-violations|new-cycles|stale-blueprint|instability-threshold=<N>]");
             System.exit(1);
             return;
@@ -226,9 +237,11 @@ public final class Main {
         JavaDependencyResolver javaResolver = new JavaDependencyResolver(blueprint.modules());
         Language lang = parseLanguage(language);
         CoverageSource coverageSource = buildCoverageSource(coveragePath);
+        ScanResultStore store = createStore(dbPath);
+        String blueprintHash = computeBlueprintHash(blueprintPath);
 
         runNormal(blueprint, javaResolver, lang, blueprint.modules(), repoPath, commitCount,
-                "check", null, failOnConditions, coverageSource);
+                "check", null, failOnConditions, coverageSource, store, blueprintHash);
     }
 
     // -------------------------------------------------------------------------
@@ -381,7 +394,8 @@ public final class Main {
                                   Language lang, Set<Module> modules,
                                   Path repoPath, int commitCount, String format,
                                   Path outPath, List<String> failOnConditions,
-                                  CoverageSource coverageSource) {
+                                  CoverageSource coverageSource,
+                                  ScanResultStore store, String blueprintHash) {
         GitSnapshotSource snapshotSource = new GitSnapshotSource(
                 repoPath, javaResolver,
                 root -> new TypeScriptDependencyResolver(modules, root),
@@ -405,6 +419,27 @@ public final class Main {
                 .map(s -> computeMetrics.compute(blueprint, s, gitStats, coverageSource))
                 .toList();
         HealthReport report = reportHealth.report(trend, profiles);
+
+        if (store != null) {
+            for (int i = 0; i < snapshots.size(); i++) {
+                Snapshot snap = snapshots.get(i);
+                ArchitectureProfile profile = profiles.get(i);
+                List<Hotspot> hotspots = profile.moduleMetrics().stream()
+                        .filter(m -> m.hotspot() > 0)
+                        .map(m -> new Hotspot(m.module().name(), 0, m.wmc(), m.hotspot()))
+                        .toList();
+                ScanRecord record = new ScanRecord(
+                        repoPath.toString(), snap.commitId(), snap.timestamp(), blueprintHash,
+                        new ArrayList<>(profile.violations()),
+                        new ArrayList<>(profile.moduleMetrics()),
+                        hotspots);
+                try {
+                    store.storeScanResult(record);
+                } catch (Exception e) {
+                    System.err.println("[arx] warning: failed to persist scan: " + e.getMessage());
+                }
+            }
+        }
 
         List<StaleModuleWarning> staleWarnings = snapshots.isEmpty()
                 ? List.of()
@@ -544,6 +579,60 @@ public final class Main {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    // -------------------------------------------------------------------------
+    // mcp-serve
+    // -------------------------------------------------------------------------
+
+    private static void runMcpServe(String[] args) {
+        String dbPath = null;
+        for (int i = 1; i < args.length; i++) {
+            if ("--db".equals(args[i])) {
+                dbPath = args[++i];
+            } else {
+                System.err.println("Unknown argument: " + args[i]);
+                System.err.println("Usage: arx mcp-serve [--db <path>]");
+                System.exit(1);
+                return;
+            }
+        }
+        ScanResultStore store = createStore(dbPath);
+        new ArxMcpServer(BlueprintLoader::load, WorkingTreeScanner::scanJavaFiles, store).run();
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    private static ScanResultStore createStore(String dbPath) {
+        try {
+            String url;
+            if (dbPath != null) {
+                url = "jdbc:h2:file:" + dbPath;
+            } else {
+                Path arxDir = Path.of(System.getProperty("user.home"), ".arx");
+                Files.createDirectories(arxDir);
+                url = "jdbc:h2:file:" + arxDir.resolve("arx");
+            }
+            return new H2ScanResultStore(url);
+        } catch (Exception e) {
+            System.err.println("[arx] warning: DB unavailable: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static String computeBlueprintHash(Path blueprintPath) {
+        try {
+            byte[] content = Files.readAllBytes(blueprintPath);
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(content);
+            StringBuilder sb = new StringBuilder(64);
+            for (byte b : hash) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
 
     private static Language parseLanguage(String language) {
         return switch (language) {

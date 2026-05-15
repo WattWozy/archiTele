@@ -109,6 +109,7 @@ Analyzes git history, computes all metrics, and prints a health report.
 | `--out <file>` | stdout | Write output to file |
 | `--language <lang>` | `java` | `java` \| `typescript` \| `auto` |
 | `--coverage <file>` | — | JaCoCo XML or `lcov.info` for CRAP scores |
+| `--db <path>` | `~/.arx/arx` | H2 database file for persistent history (created automatically) |
 
 **Examples:**
 
@@ -125,6 +126,9 @@ arx scan --repo . --blueprint arch.blu \
 
 # TypeScript monorepo
 arx scan --repo . --blueprint arch.blu --language typescript
+
+# Store results in a team-shared DB
+arx scan --repo . --blueprint arch.blu --db /shared/team/arx.db
 ```
 
 ---
@@ -144,6 +148,7 @@ Like `scan` but designed for pipelines: silent on pass, exits 1 on violations.
 | `--commits <n>` | 20 | Number of commits to analyze |
 | `--language <lang>` | `java` | `java` \| `typescript` \| `auto` |
 | `--coverage <file>` | — | JaCoCo XML or `lcov.info` |
+| `--db <path>` | `~/.arx/arx` | H2 database file for persistent history |
 | `--fail-on <condition>` | `any-violations` | See conditions below |
 
 **Fail conditions:**
@@ -255,8 +260,12 @@ Requires `ARX_API_KEY` (Anthropic API key). Optionally set `ARX_MODEL` to overri
 ### `mcp-serve` — MCP server for AI tools
 
 ```bash
-arx mcp-serve
+arx mcp-serve [--db <path>]
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db <path>` | `~/.arx/arx` | H2 database file; enables history tools and fast trend queries |
 
 Starts an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server on stdio. Lets Claude Code and other MCP-compatible AI tools call arx directly as a set of structured tools — no shell commands, no parsing, just typed inputs and structured JSON output.
 
@@ -292,14 +301,17 @@ Restart Claude Code after editing. The tools appear automatically — Claude wil
 
 #### Available tools
 
-| Tool | Maps to | Description |
-|------|---------|-------------|
-| `check_violations` | `arx check` | Violations in the repo or filtered to specific files |
-| `get_metrics` | `arx scan` (metrics) | Per-module instability, fan-in/out, hotspot, CRAP, hub score |
-| `infer_blueprint` | `arx infer` | Infer a blueprint from package structure |
-| `scan_report` | `arx scan` | Full report: violations, cycles, chronics, trend, metrics |
-| `query_architecture` | `arx query` | Natural language question answered with full context |
-| `get_violation_trend` | — | Violation counts per commit over N recent commits |
+| Tool | Description |
+|------|-------------|
+| `check_violations` | Violations in the repo or filtered to specific files |
+| `get_metrics` | Per-module instability, fan-in/out, hotspot, CRAP, hub score |
+| `infer_blueprint` | Infer a blueprint from package structure |
+| `scan_report` | Full report: violations, cycles, chronics, trend, metrics |
+| `query_architecture` | Natural language question answered with full context |
+| `get_violation_trend` | Violation counts per commit over N recent commits (DB-first, falls back to live scan) |
+| `get_metric_history` | Instability, abstractness, hub score trends for a module over time (requires `--db`) |
+| `get_hotspot_history` | Hotspot score history for a file or module over time (requires `--db`) |
+| `is_scanned` | Check if a commit has already been scanned with the current blueprint (requires `--db`) |
 
 #### Example prompts in Claude Code
 
@@ -320,6 +332,32 @@ Claude will call the appropriate tool, receive structured JSON, and reason over 
 - `query_architecture` requires `ARX_API_KEY` in the environment where `arx mcp-serve` runs
 - All tools accept absolute paths for `repo` and `blueprint`
 - The server logs to stderr; stdout is exclusively JSON-RPC
+- History tools (`get_metric_history`, `get_hotspot_history`, `is_scanned`) return empty results when no DB is available — they never block the scan
+- `get_violation_trend` queries the DB first (fast); falls back to a live git scan if no DB data exists and stores the results automatically
+
+---
+
+## Persistent history
+
+Arx optionally writes scan results to an embedded H2 database. This enables:
+
+- **Fast trend queries** — `get_violation_trend` returns in milliseconds from DB instead of re-scanning git history
+- **Metric history** — track instability, hub score, and other metrics per module across commits
+- **Hotspot history** — watch hotspot scores evolve over time for a file or module
+- **Skip-if-scanned** — check whether a commit was already analyzed before scheduling work
+
+The database is created automatically at `~/.arx/arx.mv.db` on first use. No setup required.
+
+```bash
+# Default location: ~/.arx/arx.mv.db
+arx scan --repo . --blueprint arch.blu
+
+# Custom location (e.g. team-shared or CI workspace)
+arx scan --repo . --blueprint arch.blu --db /shared/arx.db
+arx mcp-serve --db /shared/arx.db
+```
+
+If the DB can't be created (permissions, disk full), arx logs a warning to stderr and continues normally. Every command works without the DB — it's a performance and history enhancement, never a requirement.
 
 ---
 

@@ -49,7 +49,10 @@
       "Bash(python -c \"import sys,json; [print\\(json.dumps\\(json.loads\\(l\\), indent=2\\)[:300]\\) for l in sys.stdin]\")",
       "Bash(mvn -q package -DskipTests)",
       "Bash(java -jar target/arx-*.jar scan --repo . --blueprint architele-v3.blu)",
-      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar scan --repo . --blueprint architele-v3.blu)"
+      "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar scan --repo . --blueprint architele-v3.blu)",
+      "Bash(where arx *)",
+      "Bash(arx --version)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" -Recurse -Filter \"*.java\")"
     ]
   },
   "enabledMcpjsonServers": [
