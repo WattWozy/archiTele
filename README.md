@@ -56,9 +56,10 @@ mvn package -Pnative -DskipTests
 
 ## The blueprint
 
-A blueprint is a plain-text file that declares your intended architecture. Two directives:
+A blueprint is a plain-text file that declares your intended architecture. Three directives:
 
 ```
+scope <relative-path>           (optional, for monorepos)
 module <name>  <package-pattern>  [layer=<N>]
 allow  <source> -> <target>
 ```
@@ -79,6 +80,17 @@ allow adapter     -> domain
 
 Everything not in an `allow` rule is a violation. Modules at lower `layer` numbers are inner (more stable); higher `layer` is outer.
 
+### Monorepo / subdirectory scans
+
+If your repo contains multiple services, pass the subdirectory as `--repo`. `arx` walks up from there to find the git root automatically, then restricts all history and file analysis to that subtree:
+
+```bash
+arx infer --repo services/billing > billing.blu
+arx scan  --repo services/billing --blueprint billing.blu
+```
+
+`infer` emits a `scope services/billing` line at the top of the output so the blueprint is self-describing. Each subdirectory scan is stored independently in the H2 database — `/monolith/services/billing` and `/monolith` are separate entries.
+
 ### Generating a blueprint with `infer`
 
 ```bash
@@ -86,7 +98,7 @@ arx infer --repo . > arch.blu
 arx infer --repo . --depth 3 > arch.blu
 ```
 
-`infer` scans your source, groups packages by prefix depth, and emits `module` + `allow` declarations from observed imports. Edit the output to reflect your *intended* architecture (the inferred deps are your current actual deps — the point is to tighten them).
+`infer` scans your source, groups packages by prefix depth, and emits `module` + `allow` declarations from observed imports. When `--repo` points to a subdirectory of a git repo, a `scope` line is prepended automatically. Edit the output to reflect your *intended* architecture (the inferred deps are your current actual deps — the point is to tighten them).
 
 ---
 
@@ -442,6 +454,9 @@ CRAP score: `complexity² × (1 − line_coverage)²`. A score above 30 indicate
 ```
 # comment
 
+# Optional: restrict scan to a subdirectory of the git root (monorepo use)
+scope <relative-path-from-git-root>
+
 # Declare a module: name, package glob, optional layer
 module <name>  <package-prefix>.**  [layer=<N>]
 
@@ -449,6 +464,7 @@ module <name>  <package-prefix>.**  [layer=<N>]
 allow <source-module> -> <target-module>
 ```
 
+- `scope` is optional metadata — `arx infer` emits it automatically for subdirectory scans; `arx scan` reads it but does not enforce it
 - Package patterns support `.**` suffix (matches the prefix and all sub-packages)
 - `layer=0` is innermost (domain), higher numbers are outer (adapters, infrastructure)
 - Dependencies from lower layer to higher layer are flagged with dependency-inversion guidance

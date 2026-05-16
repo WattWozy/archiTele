@@ -124,6 +124,9 @@ public final class Main {
             return;
         }
 
+        Path scanRoot = repoPath.toAbsolutePath().normalize();
+        Path gitRoot = resolveGitRoot(scanRoot);
+
         Blueprint blueprint = BlueprintLoader.load(blueprintPath);
         JavaDependencyResolver javaResolver = new JavaDependencyResolver(blueprint.modules());
         Language lang = parseLanguage(language);
@@ -132,7 +135,7 @@ public final class Main {
         String blueprintHash = computeBlueprintHash(blueprintPath);
         String blueprintText = readBlueprintText(blueprintPath);
 
-        runNormal(blueprint, javaResolver, lang, blueprint.modules(), repoPath, commitCount,
+        runNormal(blueprint, javaResolver, lang, blueprint.modules(), gitRoot, scanRoot, commitCount,
                 format, outPath, List.of(), coverageSource, store, blueprintHash, blueprintText);
     }
 
@@ -237,6 +240,9 @@ public final class Main {
             failOnConditions.add("any-violations");
         }
 
+        Path scanRoot = repoPath.toAbsolutePath().normalize();
+        Path gitRoot = resolveGitRoot(scanRoot);
+
         Blueprint blueprint = BlueprintLoader.load(blueprintPath);
         JavaDependencyResolver javaResolver = new JavaDependencyResolver(blueprint.modules());
         Language lang = parseLanguage(language);
@@ -245,7 +251,7 @@ public final class Main {
         String blueprintHash = computeBlueprintHash(blueprintPath);
         String blueprintText = readBlueprintText(blueprintPath);
 
-        runNormal(blueprint, javaResolver, lang, blueprint.modules(), repoPath, commitCount,
+        runNormal(blueprint, javaResolver, lang, blueprint.modules(), gitRoot, scanRoot, commitCount,
                 "check", null, failOnConditions, coverageSource, store, blueprintHash, blueprintText);
     }
 
@@ -277,9 +283,12 @@ public final class Main {
             return;
         }
 
-        Set<Path> javaFiles = WorkingTreeScanner.scanJavaFiles(repoPath);
+        Path scanRoot = repoPath.toAbsolutePath().normalize();
+        Path gitRoot = resolveGitRoot(scanRoot);
+
+        Set<Path> javaFiles = WorkingTreeScanner.scanJavaFiles(scanRoot);
         if (javaFiles.isEmpty()) {
-            System.err.println("No .java files found under: " + repoPath);
+            System.err.println("No .java files found under: " + scanRoot);
             System.exit(1);
             return;
         }
@@ -312,8 +321,12 @@ public final class Main {
             }
         }
 
-        String blueprint = new InferBlueprint().infer(allPackages, packageDeps, depth);
-        System.out.print(blueprint);
+        String blueprintText = new InferBlueprint().infer(allPackages, packageDeps, depth);
+        String scope = gitRoot.relativize(scanRoot).toString().replace('\\', '/');
+        if (!scope.isEmpty()) {
+            System.out.print("scope " + scope + "\n");
+        }
+        System.out.print(blueprintText);
     }
 
     // -------------------------------------------------------------------------
@@ -358,15 +371,18 @@ public final class Main {
             return;
         }
 
+        Path scanRoot = repoPath.toAbsolutePath().normalize();
+        Path gitRoot = resolveGitRoot(scanRoot);
+
         Blueprint blueprint = BlueprintLoader.load(blueprintPath);
         JavaDependencyResolver javaResolver = new JavaDependencyResolver(blueprint.modules());
 
         GitSnapshotSource snapshotSource = new GitSnapshotSource(
-                repoPath, javaResolver,
+                gitRoot, scanRoot, javaResolver,
                 root -> new TypeScriptDependencyResolver(blueprint.modules(), root),
                 Language.JAVA, new SnapshotConfig.LastN(commitCount));
         GitHistorySource historySource = new GitHistorySource(
-                repoPath, new SnapshotConfig.LastN(commitCount));
+                gitRoot, scanRoot, new SnapshotConfig.LastN(commitCount));
 
         AnalyzeSnapshot analyzeSnapshot = new AnalyzeSnapshot();
         AnalyzeHistory analyzeHistory = new AnalyzeHistory(analyzeSnapshot);
@@ -397,16 +413,16 @@ public final class Main {
 
     private static void runNormal(Blueprint blueprint, JavaDependencyResolver javaResolver,
                                   Language lang, Set<Module> modules,
-                                  Path repoPath, int commitCount, String format,
+                                  Path gitRoot, Path scanRoot, int commitCount, String format,
                                   Path outPath, List<String> failOnConditions,
                                   CoverageSource coverageSource,
                                   ScanResultStore store, String blueprintHash, String blueprintText) {
         GitSnapshotSource snapshotSource = new GitSnapshotSource(
-                repoPath, javaResolver,
+                gitRoot, scanRoot, javaResolver,
                 root -> new TypeScriptDependencyResolver(modules, root),
                 lang, new SnapshotConfig.LastN(commitCount));
         GitHistorySource historySource = new GitHistorySource(
-                repoPath, new SnapshotConfig.LastN(commitCount));
+                gitRoot, scanRoot, new SnapshotConfig.LastN(commitCount));
 
         AnalyzeSnapshot analyzeSnapshot = new AnalyzeSnapshot();
         AnalyzeHistory analyzeHistory = new AnalyzeHistory(analyzeSnapshot);
@@ -434,7 +450,7 @@ public final class Main {
                         .map(m -> new Hotspot(m.module().name(), 0, m.wmc(), m.hotspot()))
                         .toList();
                 ScanRecord record = new ScanRecord(
-                        repoPath.toString(), snap.commitId(), snap.timestamp(), blueprintHash,
+                        scanRoot.toString(), snap.commitId(), snap.timestamp(), blueprintHash,
                         blueprintText,
                         new ArrayList<>(profile.violations()),
                         new ArrayList<>(profile.moduleMetrics()),
@@ -773,6 +789,17 @@ public final class Main {
                 System.exit(1);
             }
         }
+    }
+
+    private static Path resolveGitRoot(Path path) {
+        Path current = path.toAbsolutePath().normalize();
+        while (current != null) {
+            if (Files.isDirectory(current.resolve(".git"))) {
+                return current;
+            }
+            current = current.getParent();
+        }
+        return path.toAbsolutePath().normalize();
     }
 
     private static void printVersion() {

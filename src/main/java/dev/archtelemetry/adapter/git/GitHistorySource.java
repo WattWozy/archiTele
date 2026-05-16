@@ -14,6 +14,9 @@ import org.eclipse.jgit.treewalk.AbstractTreeIterator;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.eclipse.jgit.treewalk.EmptyTreeIterator;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.treewalk.filter.AndTreeFilter;
+import org.eclipse.jgit.treewalk.filter.PathFilter;
+import org.eclipse.jgit.treewalk.filter.TreeFilter;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 
 import java.io.IOException;
@@ -27,17 +30,25 @@ import java.util.Set;
 
 public final class GitHistorySource implements HistorySource {
 
-    private final Path repoPath;
+    private final Path gitRoot;
+    private final String scopePath; // forward-slash relative path from gitRoot to scanRoot, or null
     private final SnapshotConfig config;
 
+    /** Backward-compatible: scan root equals git root. */
     public GitHistorySource(Path repoPath, SnapshotConfig config) {
-        this.repoPath = repoPath;
+        this(repoPath, repoPath, config);
+    }
+
+    public GitHistorySource(Path gitRoot, Path scanRoot, SnapshotConfig config) {
+        this.gitRoot = gitRoot;
+        String rel = gitRoot.relativize(scanRoot).toString().replace('\\', '/');
+        this.scopePath = rel.isEmpty() ? null : rel;
         this.config = config;
     }
 
     @Override
     public List<CommitEntry> fetchHistory() {
-        try (Git git = Git.open(repoPath.toFile())) {
+        try (Git git = Git.open(gitRoot.toFile())) {
             Repository repo = git.getRepository();
             List<RevCommit> commits = collectCommits(repo);
             List<CommitEntry> entries = new ArrayList<>();
@@ -60,6 +71,9 @@ public final class GitHistorySource implements HistorySource {
     private List<RevCommit> collectCommits(Repository repo) throws IOException {
         List<RevCommit> commits = new ArrayList<>();
         try (RevWalk walk = new RevWalk(repo)) {
+            if (scopePath != null) {
+                walk.setTreeFilter(AndTreeFilter.create(PathFilter.create(scopePath), TreeFilter.ANY_DIFF));
+            }
             walk.markStart(walk.parseCommit(repo.resolve("HEAD")));
             switch (config) {
                 case SnapshotConfig.LastN lastN -> {
@@ -98,10 +112,14 @@ public final class GitHistorySource implements HistorySource {
             }
         }
 
+        String scopePrefix = scopePath != null ? scopePath + "/" : null;
         List<DiffEntry> diffs = df.scan(oldTree, newTree);
         for (DiffEntry diff : diffs) {
-            if (!diff.getNewPath().equals(DiffEntry.DEV_NULL)) {
-                paths.add(diff.getNewPath());
+            String newPath = diff.getNewPath();
+            if (!newPath.equals(DiffEntry.DEV_NULL)) {
+                if (scopePrefix == null || newPath.startsWith(scopePrefix)) {
+                    paths.add(scopePrefix != null ? newPath.substring(scopePrefix.length()) : newPath);
+                }
             }
         }
         return paths;

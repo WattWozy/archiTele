@@ -13,7 +13,10 @@ import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevSort;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.treewalk.filter.AndTreeFilter;
+import org.eclipse.jgit.treewalk.filter.PathFilter;
 import org.eclipse.jgit.treewalk.filter.PathSuffixFilter;
+import org.eclipse.jgit.treewalk.filter.TreeFilter;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -32,21 +35,31 @@ import java.util.function.Function;
 
 public final class GitSnapshotSource implements SnapshotSource {
 
-    private final Path repoPath;
+    private final Path gitRoot;
+    private final String scopePath; // forward-slash relative path from gitRoot to scanRoot, or null
     private final DependencyResolver javaResolver;
     private final Function<Path, DependencyResolver> tsResolverFactory;
     private final Language language;
     private final SnapshotConfig config;
 
-    /** Backward-compatible constructor for Java-only analysis. */
+    /** Backward-compatible: scan root equals git root. */
     public GitSnapshotSource(Path repoPath, DependencyResolver resolver, SnapshotConfig config) {
-        this(repoPath, resolver, null, Language.JAVA, config);
+        this(repoPath, repoPath, resolver, null, Language.JAVA, config);
     }
 
+    /** Backward-compatible: scan root equals git root. */
     public GitSnapshotSource(Path repoPath, DependencyResolver javaResolver,
                               Function<Path, DependencyResolver> tsResolverFactory,
                               Language language, SnapshotConfig config) {
-        this.repoPath = repoPath;
+        this(repoPath, repoPath, javaResolver, tsResolverFactory, language, config);
+    }
+
+    public GitSnapshotSource(Path gitRoot, Path scanRoot, DependencyResolver javaResolver,
+                              Function<Path, DependencyResolver> tsResolverFactory,
+                              Language language, SnapshotConfig config) {
+        this.gitRoot = gitRoot;
+        String rel = gitRoot.relativize(scanRoot).toString().replace('\\', '/');
+        this.scopePath = rel.isEmpty() ? null : rel;
         this.javaResolver = javaResolver;
         this.tsResolverFactory = tsResolverFactory;
         this.language = language;
@@ -55,7 +68,7 @@ public final class GitSnapshotSource implements SnapshotSource {
 
     @Override
     public List<Snapshot> fetchSnapshots() {
-        try (Git git = Git.open(repoPath.toFile())) {
+        try (Git git = Git.open(gitRoot.toFile())) {
             Repository repo = git.getRepository();
             List<RevCommit> commits = collectCommits(repo);
             List<Snapshot> snapshots = new ArrayList<>();
@@ -130,15 +143,21 @@ public final class GitSnapshotSource implements SnapshotSource {
     private Set<Path> extractFiles(Repository repo, RevCommit commit, Path tempDir,
                                     String... extensions) throws IOException {
         Set<Path> files = new HashSet<>();
+        String scopePrefix = scopePath != null ? scopePath + "/" : null;
         for (String ext : extensions) {
+            TreeFilter filter = scopePath != null
+                    ? AndTreeFilter.create(PathFilter.create(scopePath), PathSuffixFilter.create(ext))
+                    : PathSuffixFilter.create(ext);
             try (TreeWalk treeWalk = new TreeWalk(repo)) {
                 treeWalk.addTree(commit.getTree());
                 treeWalk.setRecursive(true);
-                treeWalk.setFilter(PathSuffixFilter.create(ext));
+                treeWalk.setFilter(filter);
                 while (treeWalk.next()) {
                     String gitPath = treeWalk.getPathString();
+                    // Strip scope prefix so tempDir mirrors scan-root-relative layout
+                    String relPath = scopePrefix != null ? gitPath.substring(scopePrefix.length()) : gitPath;
                     ObjectLoader loader = repo.open(treeWalk.getObjectId(0));
-                    Path target = resolvePath(tempDir, gitPath);
+                    Path target = resolvePath(tempDir, relPath);
                     Files.createDirectories(target.getParent());
                     Files.write(target, loader.getBytes());
                     files.add(target);

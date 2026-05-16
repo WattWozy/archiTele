@@ -13,6 +13,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 public final class BlueprintLoader {
@@ -23,12 +24,15 @@ public final class BlueprintLoader {
             Map<String, List<String>> modulePatterns = new LinkedHashMap<>();
             Map<String, Integer> moduleLayers = new LinkedHashMap<>();
             List<String[]> allowRules = new ArrayList<>();
+            Optional<String> scope = Optional.empty();
 
             for (String raw : lines) {
                 String line = raw.strip();
                 if (line.isEmpty() || line.startsWith("#")) continue;
 
-                if (line.startsWith("module ")) {
+                if (line.startsWith("scope ")) {
+                    scope = Optional.of(line.substring(6).strip());
+                } else if (line.startsWith("module ")) {
                     String rest = line.substring(7).strip();
                     int space = rest.indexOf(' ');
                     if (space < 0) continue;
@@ -72,7 +76,7 @@ public final class BlueprintLoader {
                 }
             }
 
-            return new Blueprint(new HashSet<>(modules.values()), allowed);
+            return new Blueprint(new HashSet<>(modules.values()), allowed, scope);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
