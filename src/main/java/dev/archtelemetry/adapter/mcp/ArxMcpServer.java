@@ -674,6 +674,8 @@ public final class ArxMcpServer {
     private void persistScanResults(String repoStr, String blueprintStr, ScanResult scan) {
         if (store == null) return;
         String blueprintHash = computeBlueprintHash(blueprintStr);
+        String blueprintText;
+        try { blueprintText = Files.readString(Path.of(blueprintStr)); } catch (Exception e) { blueprintText = ""; }
         List<Snapshot> snapshots = scan.snapshots;
         List<ArchitectureProfile> profiles = scan.profiles;
         for (int i = 0; i < snapshots.size(); i++) {
@@ -685,9 +687,11 @@ public final class ArxMcpServer {
                     .toList();
             ScanRecord record = new ScanRecord(
                     repoStr, snap.commitId(), snap.timestamp(), blueprintHash,
+                    blueprintText,
                     new ArrayList<>(profile.violations()),
                     new ArrayList<>(profile.moduleMetrics()),
-                    hotspots);
+                    hotspots,
+                    new ArrayList<>(profile.cycles()));
             try {
                 store.storeScanResult(record);
             } catch (Exception e) {

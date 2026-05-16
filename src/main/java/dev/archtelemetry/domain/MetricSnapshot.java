@@ -15,5 +15,8 @@ public record MetricSnapshot(
         double crapScore,
         int wmc,
         double pageRank,
-        double betweenness
+        double betweenness,
+        double testDebtScore,
+        double churnAcceleration,
+        double busFactorRisk
 ) {}

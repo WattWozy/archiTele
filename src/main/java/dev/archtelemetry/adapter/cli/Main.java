@@ -28,6 +28,7 @@ import dev.archtelemetry.application.port.ResolvedData;
 import dev.archtelemetry.application.port.ResolvedDataWithLocations;
 import dev.archtelemetry.application.port.ScanResultStore;
 import dev.archtelemetry.domain.ArchitectureProfile;
+import dev.archtelemetry.domain.DependencyCycle;
 import dev.archtelemetry.domain.Blueprint;
 import dev.archtelemetry.domain.CommitEntry;
 import dev.archtelemetry.domain.Hotspot;
@@ -127,9 +128,10 @@ public final class Main {
         CoverageSource coverageSource = buildCoverageSource(coveragePath);
         ScanResultStore store = createStore(dbPath);
         String blueprintHash = computeBlueprintHash(blueprintPath);
+        String blueprintText = readBlueprintText(blueprintPath);
 
         runNormal(blueprint, javaResolver, lang, blueprint.modules(), repoPath, commitCount,
-                format, outPath, List.of(), coverageSource, store, blueprintHash);
+                format, outPath, List.of(), coverageSource, store, blueprintHash, blueprintText);
     }
 
     // -------------------------------------------------------------------------
@@ -239,9 +241,10 @@ public final class Main {
         CoverageSource coverageSource = buildCoverageSource(coveragePath);
         ScanResultStore store = createStore(dbPath);
         String blueprintHash = computeBlueprintHash(blueprintPath);
+        String blueprintText = readBlueprintText(blueprintPath);
 
         runNormal(blueprint, javaResolver, lang, blueprint.modules(), repoPath, commitCount,
-                "check", null, failOnConditions, coverageSource, store, blueprintHash);
+                "check", null, failOnConditions, coverageSource, store, blueprintHash, blueprintText);
     }
 
     // -------------------------------------------------------------------------
@@ -395,7 +398,7 @@ public final class Main {
                                   Path repoPath, int commitCount, String format,
                                   Path outPath, List<String> failOnConditions,
                                   CoverageSource coverageSource,
-                                  ScanResultStore store, String blueprintHash) {
+                                  ScanResultStore store, String blueprintHash, String blueprintText) {
         GitSnapshotSource snapshotSource = new GitSnapshotSource(
                 repoPath, javaResolver,
                 root -> new TypeScriptDependencyResolver(modules, root),
@@ -430,9 +433,11 @@ public final class Main {
                         .toList();
                 ScanRecord record = new ScanRecord(
                         repoPath.toString(), snap.commitId(), snap.timestamp(), blueprintHash,
+                        blueprintText,
                         new ArrayList<>(profile.violations()),
                         new ArrayList<>(profile.moduleMetrics()),
-                        hotspots);
+                        hotspots,
+                        new ArrayList<>(profile.cycles()));
                 try {
                     store.storeScanResult(record);
                 } catch (Exception e) {
@@ -631,6 +636,14 @@ public final class Main {
             return sb.toString();
         } catch (Exception e) {
             return "unknown";
+        }
+    }
+
+    private static String readBlueprintText(Path blueprintPath) {
+        try {
+            return Files.readString(blueprintPath);
+        } catch (Exception e) {
+            return "";
         }
     }
 

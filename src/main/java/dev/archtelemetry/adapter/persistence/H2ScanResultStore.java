@@ -1,6 +1,7 @@
 package dev.archtelemetry.adapter.persistence;
 
 import dev.archtelemetry.application.port.ScanResultStore;
+import dev.archtelemetry.domain.CycleTrend;
 import dev.archtelemetry.domain.HotspotSnapshot;
 import dev.archtelemetry.domain.MetricSnapshot;
 import dev.archtelemetry.domain.ModuleMetrics;
@@ -44,10 +45,12 @@ public final class H2ScanResultStore implements ScanResultStore {
                     commit_hash    VARCHAR(40) NOT NULL,
                     commit_time    TIMESTAMP NOT NULL,
                     blueprint_hash VARCHAR(64) NOT NULL,
+                    blueprint_text TEXT,
                     scanned_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(repo_path, commit_hash, blueprint_hash)
                 )
                 """);
+            stmt.execute("ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS blueprint_text TEXT");
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS violations (
                     id             INTEGER AUTO_INCREMENT PRIMARY KEY,
@@ -63,21 +66,27 @@ public final class H2ScanResultStore implements ScanResultStore {
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_violations_modules ON violations(source_module, target_module)");
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS module_metrics (
-                    id            INTEGER AUTO_INCREMENT PRIMARY KEY,
-                    scan_id       INTEGER NOT NULL REFERENCES scan_results(id),
-                    module_name   VARCHAR(256) NOT NULL,
-                    fan_in        INTEGER,
-                    fan_out       INTEGER,
-                    instability   DOUBLE,
-                    abstractness  DOUBLE,
-                    distance      DOUBLE,
-                    hub_score     DOUBLE,
-                    crap_score    DOUBLE,
-                    wmc           INTEGER,
-                    page_rank     DOUBLE,
-                    betweenness   DOUBLE
+                    id                INTEGER AUTO_INCREMENT PRIMARY KEY,
+                    scan_id           INTEGER NOT NULL REFERENCES scan_results(id),
+                    module_name       VARCHAR(256) NOT NULL,
+                    fan_in            INTEGER,
+                    fan_out           INTEGER,
+                    instability       DOUBLE,
+                    abstractness      DOUBLE,
+                    distance          DOUBLE,
+                    hub_score         DOUBLE,
+                    crap_score        DOUBLE,
+                    wmc               INTEGER,
+                    page_rank         DOUBLE,
+                    betweenness       DOUBLE,
+                    test_debt_score   DOUBLE,
+                    churn_acceleration DOUBLE,
+                    bus_factor_risk   DOUBLE
                 )
                 """);
+            stmt.execute("ALTER TABLE module_metrics ADD COLUMN IF NOT EXISTS test_debt_score DOUBLE");
+            stmt.execute("ALTER TABLE module_metrics ADD COLUMN IF NOT EXISTS churn_acceleration DOUBLE");
+            stmt.execute("ALTER TABLE module_metrics ADD COLUMN IF NOT EXISTS bus_factor_risk DOUBLE");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_metrics_scan ON module_metrics(scan_id)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_metrics_module ON module_metrics(module_name)");
             stmt.execute("""
@@ -91,6 +100,15 @@ public final class H2ScanResultStore implements ScanResultStore {
                 )
                 """);
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_hotspots_scan ON hotspots(scan_id)");
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS cycles (
+                    id          INTEGER AUTO_INCREMENT PRIMARY KEY,
+                    scan_id     INTEGER NOT NULL REFERENCES scan_results(id),
+                    cycle_id    INT NOT NULL,
+                    module_name VARCHAR(256) NOT NULL
+                )
+                """);
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_cycles_scan ON cycles(scan_id)");
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize DB schema", e);
         }
@@ -105,6 +123,7 @@ public final class H2ScanResultStore implements ScanResultStore {
                 insertViolations(conn, scanId, record);
                 insertModuleMetrics(conn, scanId, record);
                 insertHotspots(conn, scanId, record);
+                insertCycles(conn, scanId, record);
                 conn.commit();
                 return scanId;
             } catch (SQLException e) {
@@ -119,12 +138,13 @@ public final class H2ScanResultStore implements ScanResultStore {
     private long insertScanResult(Connection conn, ScanRecord record) throws SQLException {
         // H2 proprietary MERGE: inserts if KEY not present, updates otherwise (idempotent)
         try (PreparedStatement ps = conn.prepareStatement(
-                "MERGE INTO scan_results (repo_path, commit_hash, commit_time, blueprint_hash) " +
-                "KEY (repo_path, commit_hash, blueprint_hash) VALUES (?, ?, ?, ?)")) {
+                "MERGE INTO scan_results (repo_path, commit_hash, commit_time, blueprint_hash, blueprint_text) " +
+                "KEY (repo_path, commit_hash, blueprint_hash) VALUES (?, ?, ?, ?, ?)")) {
             ps.setString(1, record.repoPath());
             ps.setString(2, record.commitHash());
             ps.setTimestamp(3, Timestamp.from(record.commitTime()));
             ps.setString(4, record.blueprintHash());
+            ps.setString(5, record.blueprintText());
             ps.executeUpdate();
         }
         try (PreparedStatement ps = conn.prepareStatement(
@@ -165,8 +185,9 @@ public final class H2ScanResultStore implements ScanResultStore {
         if (record.moduleMetrics().isEmpty()) return;
         String sql = "INSERT INTO module_metrics " +
                 "(scan_id, module_name, fan_in, fan_out, instability, abstractness, distance, " +
-                "hub_score, crap_score, wmc, page_rank, betweenness) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                "hub_score, crap_score, wmc, page_rank, betweenness, " +
+                "test_debt_score, churn_acceleration, bus_factor_risk) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             for (ModuleMetrics m : record.moduleMetrics()) {
                 ps.setLong(1, scanId);
@@ -181,6 +202,9 @@ public final class H2ScanResultStore implements ScanResultStore {
                 ps.setInt(10, m.wmc());
                 ps.setDouble(11, m.pageRank());
                 ps.setDouble(12, m.betweenness());
+                ps.setDouble(13, m.testDebtScore());
+                ps.setDouble(14, m.churnAcceleration());
+                ps.setDouble(15, m.busFactorRisk());
                 ps.addBatch();
             }
             ps.executeBatch();
@@ -202,6 +226,26 @@ public final class H2ScanResultStore implements ScanResultStore {
                 ps.setInt(4, h.complexity());
                 ps.setDouble(5, h.score());
                 ps.addBatch();
+            }
+            ps.executeBatch();
+        }
+    }
+
+    private void insertCycles(Connection conn, long scanId, ScanRecord record) throws SQLException {
+        try (PreparedStatement del = conn.prepareStatement("DELETE FROM cycles WHERE scan_id=?")) {
+            del.setLong(1, scanId);
+            del.executeUpdate();
+        }
+        if (record.cycles().isEmpty()) return;
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO cycles (scan_id, cycle_id, module_name) VALUES (?, ?, ?)")) {
+            for (int i = 0; i < record.cycles().size(); i++) {
+                for (var mod : record.cycles().get(i).modules()) {
+                    ps.setLong(1, scanId);
+                    ps.setInt(2, i);
+                    ps.setString(3, mod.name());
+                    ps.addBatch();
+                }
             }
             ps.executeBatch();
         }
@@ -253,7 +297,8 @@ public final class H2ScanResultStore implements ScanResultStore {
     public List<MetricSnapshot> getMetricHistory(String repoPath, String moduleName, int lastN) {
         String sql = "SELECT sr.commit_hash, sr.commit_time, mm.module_name, mm.fan_in, mm.fan_out, " +
                      "mm.instability, mm.abstractness, mm.distance, mm.hub_score, mm.crap_score, " +
-                     "mm.wmc, mm.page_rank, mm.betweenness " +
+                     "mm.wmc, mm.page_rank, mm.betweenness, " +
+                     "mm.test_debt_score, mm.churn_acceleration, mm.bus_factor_risk " +
                      "FROM scan_results sr JOIN module_metrics mm ON mm.scan_id = sr.id AND mm.module_name = ? " +
                      "WHERE sr.repo_path = ? ORDER BY sr.commit_time DESC LIMIT ?";
         List<MetricSnapshot> result = new ArrayList<>();
@@ -276,7 +321,10 @@ public final class H2ScanResultStore implements ScanResultStore {
                             rs.getDouble("crap_score"),
                             rs.getInt("wmc"),
                             rs.getDouble("page_rank"),
-                            rs.getDouble("betweenness")));
+                            rs.getDouble("betweenness"),
+                            rs.getDouble("test_debt_score"),
+                            rs.getDouble("churn_acceleration"),
+                            rs.getDouble("bus_factor_risk")));
                 }
             }
         } catch (SQLException e) {
@@ -308,6 +356,31 @@ public final class H2ScanResultStore implements ScanResultStore {
             }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to query hotspot history", e);
+        }
+        return result;
+    }
+
+    @Override
+    public List<CycleTrend> getCycleHistory(String repoPath, int lastN) {
+        String sql = "SELECT sr.commit_hash, sr.commit_time, COUNT(DISTINCT c.cycle_id) AS cc " +
+                     "FROM scan_results sr LEFT JOIN cycles c ON c.scan_id = sr.id " +
+                     "WHERE sr.repo_path = ? " +
+                     "GROUP BY sr.id, sr.commit_hash, sr.commit_time " +
+                     "ORDER BY sr.commit_time DESC LIMIT ?";
+        List<CycleTrend> result = new ArrayList<>();
+        try (Connection conn = connect(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, repoPath);
+            ps.setInt(2, lastN);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new CycleTrend(
+                            rs.getString("commit_hash"),
+                            rs.getTimestamp("commit_time").toInstant(),
+                            rs.getInt("cc")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query cycle history", e);
         }
         return result;
     }

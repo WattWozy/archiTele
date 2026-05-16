@@ -1,5 +1,6 @@
 package dev.archtelemetry.application.port;
 
+import dev.archtelemetry.domain.CycleTrend;
 import dev.archtelemetry.domain.HotspotSnapshot;
 import dev.archtelemetry.domain.MetricSnapshot;
 import dev.archtelemetry.domain.ScanRecord;
@@ -20,6 +21,9 @@ public interface ScanResultStore {
 
     /** Hotspot history for a file path or module name, ordered by commit time desc. */
     List<HotspotSnapshot> getHotspotHistory(String repoPath, String filePath, int lastN);
+
+    /** Cycle counts per commit, ordered by commit time desc. */
+    List<CycleTrend> getCycleHistory(String repoPath, int lastN);
 
     /** True if this commit was already scanned with this blueprint hash. */
     boolean hasBeenScanned(String repoPath, String commitHash, String blueprintHash);

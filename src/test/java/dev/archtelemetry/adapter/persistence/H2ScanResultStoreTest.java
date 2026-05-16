@@ -142,8 +142,8 @@ class H2ScanResultStoreTest {
                                          List<Violation> violations,
                                          List<ModuleMetrics> metrics,
                                          List<Hotspot> hotspots) {
-        return new ScanRecord(repo, commit, time, "hash1",
-                violations, metrics, hotspots);
+        return new ScanRecord(repo, commit, time, "hash1", "",
+                violations, metrics, hotspots, List.of());
     }
 
     private static Violation violation(Module from, Module to) {
