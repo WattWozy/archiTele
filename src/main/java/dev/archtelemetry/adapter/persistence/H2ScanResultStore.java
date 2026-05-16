@@ -2,10 +2,15 @@ package dev.archtelemetry.adapter.persistence;
 
 import dev.archtelemetry.application.port.ScanResultStore;
 import dev.archtelemetry.domain.CycleTrend;
+import dev.archtelemetry.domain.Dependency;
+import dev.archtelemetry.domain.DependencyCycle;
+import dev.archtelemetry.domain.Hotspot;
 import dev.archtelemetry.domain.HotspotSnapshot;
 import dev.archtelemetry.domain.MetricSnapshot;
+import dev.archtelemetry.domain.Module;
 import dev.archtelemetry.domain.ModuleMetrics;
 import dev.archtelemetry.domain.ScanRecord;
+import dev.archtelemetry.domain.Violation;
 import dev.archtelemetry.domain.ViolationTrend;
 
 import java.sql.Connection;
@@ -16,7 +21,9 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class H2ScanResultStore implements ScanResultStore {
 
@@ -383,6 +390,107 @@ public final class H2ScanResultStore implements ScanResultStore {
             throw new RuntimeException("Failed to query cycle history", e);
         }
         return result;
+    }
+
+    @Override
+    public List<String> getDistinctRepoPaths() {
+        String sql = "SELECT DISTINCT repo_path FROM scan_results ORDER BY repo_path";
+        List<String> result = new ArrayList<>();
+        try (Connection conn = connect();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) result.add(rs.getString("repo_path"));
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query repo paths", e);
+        }
+        return result;
+    }
+
+    @Override
+    public ScanRecord getLatestScanRecord(String repoPath) {
+        long scanId;
+        String commitHash;
+        java.time.Instant commitTime;
+        String blueprintHash;
+        String blueprintText;
+
+        try (Connection conn = connect()) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id, commit_hash, commit_time, blueprint_hash, blueprint_text " +
+                    "FROM scan_results WHERE repo_path = ? ORDER BY commit_time DESC LIMIT 1")) {
+                ps.setString(1, repoPath);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) return null;
+                    scanId      = rs.getLong("id");
+                    commitHash  = rs.getString("commit_hash");
+                    commitTime  = rs.getTimestamp("commit_time").toInstant();
+                    blueprintHash = rs.getString("blueprint_hash");
+                    blueprintText = rs.getString("blueprint_text");
+                }
+            }
+
+            List<Violation> violations = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT source_module, target_module FROM violations WHERE scan_id = ?")) {
+                ps.setLong(1, scanId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) violations.add(new Violation(new Dependency(
+                            new Module(rs.getString("source_module")),
+                            new Module(rs.getString("target_module")))));
+                }
+            }
+
+            List<ModuleMetrics> metrics = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT module_name, fan_in, fan_out, instability, abstractness, distance, " +
+                    "hub_score, crap_score, wmc, page_rank, betweenness, " +
+                    "test_debt_score, churn_acceleration, bus_factor_risk " +
+                    "FROM module_metrics WHERE scan_id = ?")) {
+                ps.setLong(1, scanId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        metrics.add(new ModuleMetrics(
+                                new Module(rs.getString("module_name")),
+                                rs.getInt("fan_in"), rs.getInt("fan_out"),
+                                rs.getDouble("instability"), rs.getDouble("abstractness"),
+                                rs.getDouble("distance"), rs.getInt("wmc"), 0.0,
+                                rs.getDouble("churn_acceleration"), rs.getDouble("bus_factor_risk"),
+                                rs.getDouble("crap_score"), rs.getDouble("test_debt_score"),
+                                rs.getDouble("page_rank"), rs.getDouble("betweenness"),
+                                rs.getDouble("hub_score")));
+                    }
+                }
+            }
+
+            List<Hotspot> hotspots = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT file_path, churn, complexity, score FROM hotspots WHERE scan_id = ?")) {
+                ps.setLong(1, scanId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) hotspots.add(new Hotspot(
+                            rs.getString("file_path"), rs.getInt("churn"),
+                            rs.getInt("complexity"), rs.getDouble("score")));
+                }
+            }
+
+            List<DependencyCycle> cycles = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT cycle_id, module_name FROM cycles WHERE scan_id = ? ORDER BY cycle_id, module_name")) {
+                ps.setLong(1, scanId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    Map<Integer, List<Module>> byId = new LinkedHashMap<>();
+                    while (rs.next()) byId
+                            .computeIfAbsent(rs.getInt("cycle_id"), k -> new ArrayList<>())
+                            .add(new Module(rs.getString("module_name")));
+                    byId.values().forEach(mods -> cycles.add(new DependencyCycle(mods)));
+                }
+            }
+
+            return new ScanRecord(repoPath, commitHash, commitTime, blueprintHash, blueprintText,
+                    violations, metrics, hotspots, cycles);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query latest scan record", e);
+        }
     }
 
     @Override

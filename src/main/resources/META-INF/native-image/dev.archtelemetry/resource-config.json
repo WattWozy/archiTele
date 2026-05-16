@@ -4,7 +4,8 @@
       {"pattern": "org/eclipse/jgit/.*\\.properties"},
       {"pattern": "org/eclipse/jgit/internal/.*\\.properties"},
       {"pattern": "META-INF/services/org\\.eclipse\\.jgit\\..*"},
-      {"pattern": "META-INF/MANIFEST\\.MF"}
+      {"pattern": "META-INF/MANIFEST\\.MF"},
+      {"pattern": "index\\.html"}
     ]
   },
   "bundles": [

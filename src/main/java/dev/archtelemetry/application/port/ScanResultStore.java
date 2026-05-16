@@ -27,4 +27,10 @@ public interface ScanResultStore {
 
     /** True if this commit was already scanned with this blueprint hash. */
     boolean hasBeenScanned(String repoPath, String commitHash, String blueprintHash);
+
+    /** Distinct repo_path values that have been scanned, ordered alphabetically. */
+    List<String> getDistinctRepoPaths();
+
+    /** Full scan record for the most recent commit in the given repo, or null if none. */
+    ScanRecord getLatestScanRecord(String repoPath);
 }

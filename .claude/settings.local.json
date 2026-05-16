@@ -52,7 +52,8 @@
       "Bash(java -jar target/archtelemetry-1.0.0-SNAPSHOT-shaded.jar scan --repo . --blueprint architele-v3.blu)",
       "Bash(where arx *)",
       "Bash(arx --version)",
-      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" -Recurse -Filter \"*.java\")"
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" -Recurse -Filter \"*.java\")",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\\\\src\\\\main\\\\java\\\\dev\\\\archtelemetry\" -Recurse | Where-Object {$_.PSIsContainer} | Select-Object -ExpandProperty FullName | ForEach-Object {$_.Substring\\(\"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\\\\src\\\\main\\\\java\\\\\".Length\\)} | Sort-Object)"
     ]
   },
   "enabledMcpjsonServers": [

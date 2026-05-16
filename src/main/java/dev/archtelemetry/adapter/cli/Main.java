@@ -3,6 +3,7 @@ package dev.archtelemetry.adapter.cli;
 import dev.archtelemetry.adapter.coverage.JacocoXmlCoverageSource;
 import dev.archtelemetry.adapter.coverage.LcovCoverageSource;
 import dev.archtelemetry.adapter.git.GitHistorySource;
+import dev.archtelemetry.adapter.http.ArxHttpServer;
 import dev.archtelemetry.adapter.mcp.ArxMcpServer;
 import dev.archtelemetry.adapter.git.GitSnapshotSource;
 import dev.archtelemetry.adapter.git.Language;
@@ -72,6 +73,7 @@ public final class Main {
             case "infer"           -> runInferCommand(args);
             case "query"           -> runQueryCommand(args);
             case "mcp-serve"       -> runMcpServe(args);
+            case "serve"           -> runServeCommand(args);
             default -> {
                 System.err.println("Unknown subcommand: " + args[0]);
                 System.err.println();
@@ -582,8 +584,38 @@ public final class Main {
     }
 
     // -------------------------------------------------------------------------
-    // Helpers
+    // serve — HTTP server
     // -------------------------------------------------------------------------
+
+    private static void runServeCommand(String[] args) {
+        int port = 8080;
+        String dbPath = null;
+
+        for (int i = 1; i < args.length; i++) {
+            switch (args[i]) {
+                case "--port" -> port = Integer.parseInt(args[++i]);
+                case "--db"   -> dbPath = args[++i];
+                default -> {
+                    System.err.println("Unknown argument: " + args[i]);
+                    System.err.println("Usage: arx serve [--port 8080] [--db <path>]");
+                    System.exit(1);
+                }
+            }
+        }
+
+        ScanResultStore store = createStore(dbPath);
+        if (store == null) {
+            System.err.println("[arx] Cannot start HTTP server: database unavailable");
+            System.exit(1);
+            return;
+        }
+        try {
+            new ArxHttpServer(store, port).start();
+        } catch (java.io.IOException e) {
+            System.err.println("Failed to start HTTP server: " + e.getMessage());
+            System.exit(1);
+        }
+    }
 
     // -------------------------------------------------------------------------
     // mcp-serve
@@ -759,6 +791,7 @@ public final class Main {
                   infer   Generate a blueprint draft from source code
                   query     Ask a natural language question about your architecture
                   mcp-serve Start an MCP server on stdio (for Claude Code / AI tools)
+                  serve     Start an HTTP server exposing scan data as JSON APIs
 
                 Quick start:
                   arx infer --repo .
@@ -802,6 +835,10 @@ public final class Main {
                   --blueprint <path>    Blueprint file (required)
                   --commits <n>         Commits to analyze (default: 20)
                   "question"            Natural language question (positional)
+
+                serve options:
+                  --port <n>            HTTP port (default: 8080)
+                  --db <path>           H2 database path (default: ~/.arx/arx)
 
                 Environment:
                   ARX_API_KEY   Anthropic API key (required for query)
