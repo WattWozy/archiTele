@@ -118,7 +118,7 @@ public final class Main {
         if (repoPath == null || blueprintPath == null) {
             System.err.println("scan requires --repo and --blueprint");
             System.err.println("Usage: arx scan --repo <path> --blueprint <path>");
-            System.err.println("  [--commits N] [--format console|json|markdown|html|ai-feedback]");
+            System.err.println("  [--commits N] [--format console|json|markdown|html|pdf|ai-feedback]");
             System.err.println("  [--out file] [--language java|typescript|auto] [--coverage file] [--db file]");
             System.exit(1);
             return;
@@ -473,6 +473,7 @@ public final class Main {
             case "json"        -> writeOutput(JsonReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
             case "markdown"    -> writeOutput(MarkdownReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
             case "html"        -> writeOutput(HtmlReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
+            case "pdf"         -> writeBinaryOutput(PdfReportWriter.generate(trend, report, snapshots, staleWarnings), outPath);
             case "ai-feedback" -> {
                 Set<dev.archtelemetry.domain.Violation> violations = report.latestProfile() != null
                         ? report.latestProfile().violations()
@@ -495,7 +496,7 @@ public final class Main {
             }
             default -> {
                 System.err.println("Unknown format: " + format
-                        + ". Valid: console, json, markdown, html, ai-feedback");
+                        + ". Valid: console, json, markdown, html, pdf, ai-feedback");
                 System.exit(1);
             }
         }
@@ -777,6 +778,26 @@ public final class Main {
         return exitCode;
     }
 
+    private static void writeBinaryOutput(byte[] content, Path outPath) {
+        if (outPath == null) {
+            try {
+                System.out.write(content);
+                System.out.flush();
+            } catch (IOException e) {
+                System.err.println("Failed to write PDF: " + e.getMessage());
+                System.exit(1);
+            }
+        } else {
+            try {
+                Files.write(outPath, content);
+                System.err.println("Report written to: " + outPath);
+            } catch (IOException e) {
+                System.err.println("Failed to write report: " + e.getMessage());
+                System.exit(1);
+            }
+        }
+    }
+
     private static void writeOutput(String content, Path outPath) {
         if (outPath == null) {
             System.out.print(content);
@@ -831,7 +852,7 @@ public final class Main {
                   --repo <path>         Git repository (required)
                   --blueprint <path>    Blueprint file (required)
                   --commits <n>         Commits to analyze (default: 20)
-                  --format <fmt>        console | json | markdown | html | ai-feedback
+                  --format <fmt>        console | json | markdown | html | pdf | ai-feedback
                   --out <file>          Write output to file (default: stdout)
                   --language <lang>     java | typescript | auto (default: java)
                   --coverage <file>     JaCoCo XML or lcov.info

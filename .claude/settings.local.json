@@ -53,7 +53,14 @@
       "Bash(where arx *)",
       "Bash(arx --version)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\" -Recurse -Filter \"*.java\")",
-      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\\\\src\\\\main\\\\java\\\\dev\\\\archtelemetry\" -Recurse | Where-Object {$_.PSIsContainer} | Select-Object -ExpandProperty FullName | ForEach-Object {$_.Substring\\(\"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\\\\src\\\\main\\\\java\\\\\".Length\\)} | Sort-Object)"
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\\\\src\\\\main\\\\java\\\\dev\\\\archtelemetry\" -Recurse | Where-Object {$_.PSIsContainer} | Select-Object -ExpandProperty FullName | ForEach-Object {$_.Substring\\(\"C:\\\\Users\\\\nikla\\\\Desktop\\\\architele\\\\src\\\\main\\\\java\\\\\".Length\\)} | Sort-Object)",
+      "Bash(jar tf *)",
+      "Bash(grep -v \"\\\\$\")",
+      "Bash(grep \"\\\\.class$\")",
+      "Bash(jar xf *)",
+      "Bash(javap -p com/lowagie/text/Font.class)",
+      "Bash(javap -p com/lowagie/text/pdf/PdfPCell.class)",
+      "Bash(javap -p com/lowagie/text/Rectangle.class)"
     ]
   },
   "enabledMcpjsonServers": [
